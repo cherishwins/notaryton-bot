@@ -1,0 +1,13 @@
+# .gitignore
+.env
+.env.local
+.env.production
+downloads/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
