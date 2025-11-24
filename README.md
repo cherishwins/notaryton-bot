@@ -116,6 +116,38 @@ Open Telegram → @NotaryTON_bot → `/start`
 
 ---
 
+## 🧪 Testing
+
+### Run Automated Tests
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run only fast unit tests
+pytest tests/ -v -m unit
+
+# Run specific test file
+pytest tests/test_database.py -v
+```
+
+### Continuous Integration
+
+Every push to GitHub automatically runs tests via GitHub Actions.
+
+**View test results**: GitHub repo → Actions tab
+
+**Test coverage:**
+- ✅ Database operations
+- ✅ File hashing & validation
+- ✅ API request/response formats
+- ✅ Referral system logic
+- ✅ Payment amount validation
+
+See [tests/README.md](tests/README.md) for detailed testing documentation.
+
+---
+
 ## 🔌 API Integration (For Third-Party Services)
 
 NotaryTON provides a public API for other Telegram bots, dApps, and services to integrate notarization.
