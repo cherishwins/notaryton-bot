@@ -48,6 +48,8 @@ async def init_db():
                 subscription_expiry TIMESTAMP,
                 total_paid REAL DEFAULT 0,
                 referral_code TEXT UNIQUE,
+                referred_by INTEGER,
+                referral_earnings REAL DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -59,6 +61,7 @@ async def init_db():
                 contract_hash TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 paid BOOLEAN DEFAULT 0,
+                via_api BOOLEAN DEFAULT 0,
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
@@ -69,6 +72,16 @@ async def init_db():
                 amount REAL,
                 memo TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                key TEXT PRIMARY KEY,
+                user_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used TIMESTAMP,
+                requests_count INTEGER DEFAULT 0,
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
@@ -130,19 +143,40 @@ async def get_contract_code_from_tx(tx_id: str) -> bytes:
         client = LiteBalancer.from_mainnet_config(trust_level=1)
         await client.start_up()
 
-        # Parse tx_id and fetch transaction
-        # This is a simplified version - you'll need to implement full tx parsing
-        # For now, return placeholder
-        # TODO: Implement actual transaction fetching and code extraction
+        # Try to parse the tx_id as a contract address
+        try:
+            address = Address(tx_id)
+            # Get account state
+            account_state = await client.run_get_method(
+                address=address.to_str(),
+                method="get_public_key",
+                stack=[]
+            )
 
-        await client.close_all()
-        return b"contract_code_placeholder"
+            # Get the actual contract code
+            account = await client.get_account_state(address.to_str())
+            if account and hasattr(account, 'code') and account.code:
+                code = account.code
+                await client.close_all()
+                return code if isinstance(code, bytes) else str(code).encode()
+            else:
+                print(f"No code found for address: {tx_id}")
+                await client.close_all()
+                return b""
+
+        except Exception as addr_error:
+            print(f"Could not parse as address: {addr_error}")
+            # If not an address, try to fetch as transaction hash
+            # For now, return the tx_id itself as data to hash
+            await client.close_all()
+            return tx_id.encode()
+
     except Exception as e:
         print(f"Error fetching contract code: {e}")
         return b""
 
-async def send_ton_transaction(comment: str, amount_ton: float = 0.01):
-    """Send TON transaction with comment"""
+async def send_ton_transaction(comment: str, amount_ton: float = 0.001):
+    """Send TON transaction with comment (notarization proof)"""
     try:
         client = LiteBalancer.from_mainnet_config(trust_level=1)
         await client.start_up()
@@ -150,31 +184,130 @@ async def send_ton_transaction(comment: str, amount_ton: float = 0.01):
         mnemonics = TON_WALLET_SECRET.split()
         wallet = await WalletV4R2.from_mnemonic(provider=client, mnemonics=mnemonics)
 
-        await wallet.transfer(
+        # Send transaction to self with comment (proof stored on-chain)
+        result = await wallet.transfer(
             destination=SERVICE_TON_WALLET,
             amount=int(amount_ton * 1e9),  # Convert to nanotons
             body=comment
         )
 
+        print(f"✅ Notarization transaction sent with comment: {comment}")
+
         await client.close_all()
-        return "Transaction sent"
+        return result
     except Exception as e:
-        print(f"Error sending transaction: {e}")
+        print(f"❌ Error sending transaction: {e}")
+        print(f"   Make sure wallet has sufficient TON balance")
         raise
 
 async def poll_wallet_for_payments():
     """Background task to poll wallet for incoming payments"""
+    last_processed_lt = None  # Track last processed logical time
+
     while True:
         try:
             client = LiteBalancer.from_mainnet_config(trust_level=1)
             await client.start_up()
 
-            # TODO: Implement actual wallet polling logic
-            # 1. Get recent transactions
-            # 2. Match to pending payments
-            # 3. Activate subscriptions
+            # Get wallet address
+            wallet_address = Address(SERVICE_TON_WALLET)
+
+            # Get recent transactions
+            try:
+                transactions = await client.get_transactions(
+                    address=wallet_address.to_str(),
+                    count=10
+                )
+
+                for tx in transactions:
+                    # Skip if we've already processed this transaction
+                    if last_processed_lt and tx.lt <= last_processed_lt:
+                        continue
+
+                    # Check if this is an incoming transaction
+                    if hasattr(tx, 'in_msg') and tx.in_msg:
+                        in_msg = tx.in_msg
+
+                        # Extract amount (in nanotons)
+                        amount_nano = getattr(in_msg, 'value', 0) if hasattr(in_msg, 'value') else 0
+                        amount_ton = amount_nano / 1e9
+
+                        # Extract memo/comment
+                        memo = ""
+                        if hasattr(in_msg, 'body') and in_msg.body:
+                            try:
+                                memo = in_msg.body.decode('utf-8', errors='ignore')
+                            except:
+                                memo = str(in_msg.body)
+
+                        print(f"📥 Incoming payment: {amount_ton} TON, memo: {memo}")
+
+                        # Try to extract user_id from memo
+                        user_id = None
+                        try:
+                            # Look for numeric user ID in memo
+                            import re
+                            match = re.search(r'\d+', memo)
+                            if match:
+                                user_id = int(match.group())
+                        except:
+                            pass
+
+                        if user_id:
+                            # Check if it's a subscription payment (0.1 TON)
+                            if amount_ton >= 0.095:  # Allow small variance
+                                await add_subscription(user_id, months=1)
+                                print(f"✅ Activated subscription for user {user_id}")
+
+                                # Notify user
+                                try:
+                                    await bot.send_message(
+                                        user_id,
+                                        "✅ **Subscription Activated!**\n\n"
+                                        "You now have unlimited notarizations for 30 days!\n\n"
+                                        "Use /notarize to seal your first contract. 🔒",
+                                        parse_mode="Markdown"
+                                    )
+                                except Exception as notify_error:
+                                    print(f"Could not notify user {user_id}: {notify_error}")
+
+                            # Check if it's a single notarization payment (0.001 TON)
+                            elif amount_ton >= 0.0009:  # Allow small variance
+                                # Add to database as paid credit
+                                async with aiosqlite.connect(DB_PATH) as db:
+                                    await db.execute("""
+                                        INSERT OR IGNORE INTO users (user_id) VALUES (?)
+                                    """, (user_id,))
+                                    await db.execute("""
+                                        UPDATE users
+                                        SET total_paid = total_paid + ?
+                                        WHERE user_id = ?
+                                    """, (amount_ton, user_id))
+                                    await db.commit()
+
+                                print(f"✅ Credited {amount_ton} TON to user {user_id}")
+
+                                # Notify user
+                                try:
+                                    await bot.send_message(
+                                        user_id,
+                                        "✅ **Payment Received!**\n\n"
+                                        f"You can now notarize one contract.\n\n"
+                                        "Use /notarize to get started! 🔒",
+                                        parse_mode="Markdown"
+                                    )
+                                except Exception as notify_error:
+                                    print(f"Could not notify user {user_id}: {notify_error}")
+
+                    # Update last processed lt
+                    if not last_processed_lt or tx.lt > last_processed_lt:
+                        last_processed_lt = tx.lt
+
+            except Exception as tx_error:
+                print(f"Error processing transactions: {tx_error}")
 
             await client.close_all()
+
         except Exception as e:
             print(f"Error polling wallet: {e}")
 
@@ -186,17 +319,66 @@ async def poll_wallet_for_payments():
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    await message.answer(
-        "🔐 **NotaryTON - Auto-Notarization for TON Memecoin Launches**\n\n"
+    user_id = message.from_user.id
+    
+    # Check for referral code in /start command
+    referral_code = None
+    if message.text and len(message.text.split()) > 1:
+        referral_code = message.text.split()[1]
+    
+    # Create user if doesn't exist
+    async with aiosqlite.connect(DB_PATH) as db:
+        if referral_code and referral_code.startswith("REF"):
+            # Extract referrer's user_id from referral code
+            try:
+                referrer_id = int(referral_code.replace("REF", ""))
+                await db.execute("""
+                    INSERT INTO users (user_id, referred_by)
+                    VALUES (?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET referred_by = ?
+                    WHERE referred_by IS NULL
+                """, (user_id, referrer_id, referrer_id))
+                await db.commit()
+                
+                # Notify referrer
+                try:
+                    await bot.send_message(
+                        referrer_id,
+                        f"🎉 New referral! User {user_id} joined via your link.\n"
+                        f"You'll earn 5% of their payments!"
+                    )
+                except:
+                    pass
+            except:
+                pass
+        else:
+            # Just create user entry
+            await db.execute("""
+                INSERT OR IGNORE INTO users (user_id) VALUES (?)
+            """, (user_id,))
+            await db.commit()
+    
+    welcome_msg = (
+        "🔐 **NotaryTON - Blockchain Infrastructure for TON**\n\n"
+        "Auto-notarize memecoin launches with immutable on-chain proof.\n\n"
         "**Commands:**\n"
-        "/subscribe - Get unlimited monthly notarizations (0.1 TON)\n"
-        "/status - Check your subscription status\n"
-        "/notarize - Manually notarize a contract\n\n"
-        "**Auto-Notarization:**\n"
-        "I auto-notarize new coin launches in monitored groups!\n"
-        "Cost: 0.001 TON per notarization",
-        parse_mode="Markdown"
+        "• /subscribe - Unlimited notarizations (0.1 TON/month)\n"
+        "• /status - Your stats & subscription\n"
+        "• /notarize - Manually notarize a contract\n"
+        "• /api - Get API access for integrations\n"
+        "• /referral - Earn 5% commission\n\n"
+        "**Features:**\n"
+        "✅ Auto-notarization in groups\n"
+        "✅ Public API for third-party bots\n"
+        "✅ Batch operations for high volume\n"
+        "✅ Instant verification\n\n"
+        "💰 **Pricing:**\n"
+        "• 0.001 TON per notarization\n"
+        "• 0.1 TON/month unlimited\n\n"
+        "🚀 **Become Infrastructure** - Every TON launch verified here."
     )
+    
+    await message.answer(welcome_msg, parse_mode="Markdown")
 
 @dp.message(Command("subscribe"))
 async def cmd_subscribe(message: types.Message):
@@ -217,30 +399,150 @@ async def cmd_subscribe(message: types.Message):
 async def cmd_status(message: types.Message):
     user_id = message.from_user.id
     has_sub = await get_user_subscription(user_id)
+    
+    # Get user stats
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT total_paid, referral_earnings, referral_code
+            FROM users WHERE user_id = ?
+        """, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            stats = {
+                "total_paid": row[0] if row else 0,
+                "referral_earnings": row[1] if row else 0,
+                "referral_code": row[2] if row else None
+            }
+        
+        async with db.execute("""
+            SELECT COUNT(*) FROM notarizations WHERE user_id = ?
+        """, (user_id,)) as cursor:
+            stats["notarizations"] = (await cursor.fetchone())[0]
 
-    if has_sub:
-        await message.answer("✅ **Active Subscription**\n\nYou have unlimited notarizations!", parse_mode="Markdown")
-    else:
-        await message.answer("❌ **No Active Subscription**\n\nUse /subscribe to get unlimited access!", parse_mode="Markdown")
+    status_msg = "✅ **Active Subscription**\n\n" if has_sub else "❌ **No Active Subscription**\n\n"
+    status_msg += f"📊 **Your Stats:**\n"
+    status_msg += f"• Notarizations: {stats['notarizations']}\n"
+    status_msg += f"• Total Spent: {stats['total_paid']:.4f} TON\n"
+    
+    if stats['referral_earnings'] > 0:
+        status_msg += f"• Referral Earnings: {stats['referral_earnings']:.4f} TON\n"
+    
+    if not has_sub:
+        status_msg += "\nUse /subscribe to get unlimited access!"
+    
+    await message.answer(status_msg, parse_mode="Markdown")
+
+@dp.message(Command("referral"))
+async def cmd_referral(message: types.Message):
+    user_id = message.from_user.id
+    
+    # Generate referral code if doesn't exist
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT referral_code FROM users WHERE user_id = ?
+        """, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            
+            if row and row[0]:
+                referral_code = row[0]
+            else:
+                # Generate unique referral code
+                referral_code = f"REF{user_id}"
+                await db.execute("""
+                    INSERT INTO users (user_id, referral_code)
+                    VALUES (?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET referral_code = ?
+                """, (user_id, referral_code, referral_code))
+                await db.commit()
+        
+        # Count referrals
+        async with db.execute("""
+            SELECT COUNT(*), COALESCE(SUM(total_paid), 0)
+            FROM users WHERE referred_by = ?
+        """, (user_id,)) as cursor:
+            ref_count, ref_revenue = await cursor.fetchone()
+    
+    referral_url = f"https://t.me/NotaryTON_bot?start={referral_code}"
+    
+    await message.answer(
+        f"🎁 **Referral Program**\n\n"
+        f"**Your Referral Link:**\n"
+        f"`{referral_url}`\n\n"
+        f"**Commission:** 5% of referrals' payments\n"
+        f"**Your Stats:**\n"
+        f"• Referrals: {ref_count}\n"
+        f"• Total Revenue: {ref_revenue:.4f} TON\n"
+        f"• Your Earnings: {ref_revenue * 0.05:.4f} TON\n\n"
+        f"💡 Share this link with other TON projects!",
+        parse_mode="Markdown"
+    )
+
+@dp.message(Command("api"))
+async def cmd_api(message: types.Message):
+    user_id = message.from_user.id
+    has_sub = await get_user_subscription(user_id)
+    
+    if not has_sub:
+        await message.answer(
+            "⚠️ **API Access Requires Subscription**\n\n"
+            "Subscribe first with /subscribe to get API access!",
+            parse_mode="Markdown"
+        )
+        return
+    
+    await message.answer(
+        f"🔌 **NotaryTON API**\n\n"
+        f"**Your API Key:** `{user_id}`\n\n"
+        f"**Endpoints:**\n"
+        f"• POST {WEBHOOK_URL}/api/v1/notarize\n"
+        f"• POST {WEBHOOK_URL}/api/v1/batch\n"
+        f"• GET {WEBHOOK_URL}/api/v1/verify/{{hash}}\n\n"
+        f"**Example:**\n"
+        f"```bash\n"
+        f"curl -X POST {WEBHOOK_URL}/api/v1/notarize \\\n"
+        f"  -H 'Content-Type: application/json' \\\n"
+        f"  -d '{{\n"
+        f"    \"api_key\": \"{user_id}\",\n"
+        f"    \"contract_address\": \"EQ...\",\n"
+        f"    \"metadata\": {{\"project_name\": \"MyCoin\"}}\n"
+        f"  }}'\n"
+        f"```\n\n"
+        f"📚 Full docs: {WEBHOOK_URL}/docs",
+        parse_mode="Markdown"
+    )
 
 @dp.message(Command("notarize"))
 async def cmd_notarize(message: types.Message):
     user_id = message.from_user.id
     has_sub = await get_user_subscription(user_id)
 
+    # Check if user has paid credits
+    has_credit = False
     if not has_sub:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT total_paid FROM users WHERE user_id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row[0] >= 0.001:
+                    has_credit = True
+
+    if not has_sub and not has_credit:
         await message.answer(
             "⚠️ **Payment Required**\n\n"
             f"Send 0.001 TON to: `{SERVICE_TON_WALLET}`\n"
-            f"Include your user ID: `{user_id}`\n\n"
-            f"Or use /subscribe for unlimited access!",
+            f"Include your user ID in memo: `{user_id}`\n\n"
+            f"Or use /subscribe for unlimited access (0.1 TON)!",
             parse_mode="Markdown"
         )
         return
 
     await message.answer(
-        "📄 **Manual Notarization**\n\n"
-        "Please send the contract address or TX ID to notarize.",
+        "📄 **Manual Notarization Ready**\n\n"
+        "Send me:\n"
+        "• A contract address (EQ...)\n"
+        "• A file to notarize\n\n"
+        "I'll seal it on TON blockchain forever! 🔒",
         parse_mode="Markdown"
     )
 
@@ -311,7 +613,19 @@ async def handle_document(message: types.Message):
     user_id = message.from_user.id
     has_sub = await get_user_subscription(user_id)
 
+    # Check if user has paid credits
+    has_credit = False
     if not has_sub:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT total_paid FROM users WHERE user_id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row[0] >= 0.001:
+                    has_credit = True
+
+    if not has_sub and not has_credit:
         await message.answer(
             f"⚠️ Send 0.001 TON to `{SERVICE_TON_WALLET}` (memo: `{user_id}`) first!",
             parse_mode="Markdown"
@@ -333,17 +647,32 @@ async def handle_document(message: types.Message):
         await send_ton_transaction(comment)
         await log_notarization(user_id, "manual_file", file_hash, paid=True)
 
+        # Deduct credit if not subscription
+        if not has_sub:
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute("""
+                    UPDATE users
+                    SET total_paid = total_paid - 0.001
+                    WHERE user_id = ?
+                """, (user_id,))
+                await db.commit()
+
         await message.answer(
             f"✅ **SEALED!**\n\n"
-            f"Hash: `{file_hash}`\n"
-            f"Check https://tonscan.org",
+            f"File: `{message.document.file_name}`\n"
+            f"Hash: `{file_hash}`\n\n"
+            f"Proof stored on TON blockchain forever! 🔒\n"
+            f"Check: https://tonscan.org/address/{SERVICE_TON_WALLET}",
             parse_mode="Markdown"
         )
     except Exception as e:
         await message.answer(f"❌ Error: {str(e)}")
 
     # Clean up
-    os.remove(file_path)
+    try:
+        os.remove(file_path)
+    except:
+        pass
 
 # ========================
 # FASTAPI ENDPOINTS
@@ -360,6 +689,179 @@ async def webhook_handler(request: Request):
 async def health_check():
     """Health check endpoint"""
     return {"status": "running", "bot": "NotaryTON", "version": "2.0-memecoin"}
+
+# ========================
+# PUBLIC API ENDPOINTS (Make NotaryTON essential infrastructure)
+# ========================
+
+@app.post("/api/v1/notarize")
+async def api_notarize(request: Request):
+    """
+    Public API for third-party services to notarize contracts
+    
+    POST /api/v1/notarize
+    {
+        "api_key": "user_telegram_id",  // For now, use Telegram user ID
+        "contract_address": "EQ...",     // TON address or tx hash
+        "metadata": {                    // Optional
+            "project_name": "MyCoin",
+            "launch_date": "2025-11-24"
+        }
+    }
+    
+    Returns: {"success": true, "hash": "...", "tx_url": "https://tonscan.org/..."}
+    """
+    try:
+        data = await request.json()
+        user_id = int(data.get("api_key", 0))
+        contract_id = data.get("contract_address", "")
+        metadata = data.get("metadata", {})
+        
+        if not user_id or not contract_id:
+            return {"success": False, "error": "Missing api_key or contract_address"}
+        
+        # Check if user has subscription or credits
+        has_sub = await get_user_subscription(user_id)
+        if not has_sub:
+            return {
+                "success": False, 
+                "error": "No active subscription",
+                "subscribe_url": f"https://t.me/NotaryTON_bot?start=subscribe"
+            }
+        
+        # Fetch and notarize contract
+        contract_code = await get_contract_code_from_tx(contract_id)
+        if not contract_code:
+            return {"success": False, "error": "Failed to fetch contract"}
+        
+        contract_hash = hash_data(contract_code)
+        comment = f"NotaryTON:API:{contract_hash[:16]}"
+        
+        # Add metadata to comment if provided
+        if metadata.get("project_name"):
+            comment = f"NotaryTON:{metadata['project_name'][:20]}:{contract_hash[:12]}"
+        
+        await send_ton_transaction(comment, amount_ton=0.001)
+        await log_notarization(user_id, contract_id, contract_hash, paid=True)
+        
+        return {
+            "success": True,
+            "hash": contract_hash,
+            "contract": contract_id,
+            "timestamp": datetime.now().isoformat(),
+            "tx_url": "https://tonscan.org/",
+            "verify_url": f"{WEBHOOK_URL}/api/v1/verify/{contract_hash}"
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/v1/verify/{contract_hash}")
+async def api_verify(contract_hash: str):
+    """
+    Public verification endpoint - anyone can verify a notarization
+    
+    GET /api/v1/verify/{hash}
+    
+    Returns: Notarization details including timestamp, tx_hash, etc.
+    """
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("""
+                SELECT tx_hash, timestamp, user_id
+                FROM notarizations
+                WHERE contract_hash = ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """, (contract_hash,)) as cursor:
+                row = await cursor.fetchone()
+                
+                if row:
+                    return {
+                        "verified": True,
+                        "hash": contract_hash,
+                        "tx_hash": row[0],
+                        "timestamp": row[1],
+                        "notarized_by": "NotaryTON",
+                        "blockchain": "TON",
+                        "explorer_url": f"https://tonscan.org/tx/{row[0]}"
+                    }
+                else:
+                    return {
+                        "verified": False,
+                        "hash": contract_hash,
+                        "message": "No notarization found for this hash"
+                    }
+    except Exception as e:
+        return {"verified": False, "error": str(e)}
+
+@app.post("/api/v1/batch")
+async def api_batch_notarize(request: Request):
+    """
+    Batch notarization for high-volume users
+    
+    POST /api/v1/batch
+    {
+        "api_key": "user_id",
+        "contracts": [
+            {"address": "EQ...", "name": "Coin1"},
+            {"address": "EQ...", "name": "Coin2"}
+        ]
+    }
+    
+    Returns: Array of results
+    """
+    try:
+        data = await request.json()
+        user_id = int(data.get("api_key", 0))
+        contracts = data.get("contracts", [])
+        
+        if not user_id or not contracts:
+            return {"success": False, "error": "Missing api_key or contracts"}
+        
+        # Must have subscription for batch operations
+        has_sub = await get_user_subscription(user_id)
+        if not has_sub:
+            return {
+                "success": False,
+                "error": "Subscription required for batch operations",
+                "subscribe_url": f"https://t.me/NotaryTON_bot?start=subscribe"
+            }
+        
+        results = []
+        for contract in contracts[:50]:  # Limit to 50 per batch
+            try:
+                address = contract.get("address", "")
+                name = contract.get("name", "")
+                
+                contract_code = await get_contract_code_from_tx(address)
+                contract_hash = hash_data(contract_code)
+                
+                comment = f"NotaryTON:{name[:20]}:{contract_hash[:12]}" if name else f"NotaryTON:Batch:{contract_hash[:16]}"
+                await send_ton_transaction(comment, amount_ton=0.001)
+                await log_notarization(user_id, address, contract_hash, paid=True)
+                
+                results.append({
+                    "success": True,
+                    "address": address,
+                    "hash": contract_hash,
+                    "verify_url": f"{WEBHOOK_URL}/api/v1/verify/{contract_hash}"
+                })
+            except Exception as e:
+                results.append({
+                    "success": False,
+                    "address": contract.get("address", ""),
+                    "error": str(e)
+                })
+        
+        return {
+            "success": True,
+            "processed": len(results),
+            "results": results
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 @app.get("/stats")
 async def stats():

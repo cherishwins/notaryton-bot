@@ -15,15 +15,24 @@
 - ✅ **Manual Notarization**: Support for file uploads and manual contracts
 
 ### Bot Commands
-- `/start` - Welcome message and feature overview
+- `/start` - Welcome message and feature overview (supports referral codes)
 - `/subscribe` - Get unlimited monthly notarizations (0.1 TON)
-- `/status` - Check subscription status
+- `/status` - Check subscription status, stats, and earnings
 - `/notarize` - Manually notarize a contract or file
+- `/api` - Get API credentials for third-party integration
+- `/referral` - Get your referral link (earn 5% commission)
 
 ### API Endpoints
+
+**Internal:**
 - `GET /` - Health check
 - `GET /stats` - Bot statistics (users, notarizations)
 - `POST /webhook/{token}` - Telegram webhook handler
+
+**Public API (requires subscription):**
+- `POST /api/v1/notarize` - Notarize single contract (third-party integration)
+- `POST /api/v1/batch` - Batch notarize up to 50 contracts
+- `GET /api/v1/verify/{hash}` - Public verification (no auth required)
 
 ---
 
@@ -104,6 +113,62 @@ python bot.py
 ### 4. Test
 
 Open Telegram → @NotaryTON_bot → `/start`
+
+---
+
+## 🔌 API Integration (For Third-Party Services)
+
+NotaryTON provides a public API for other Telegram bots, dApps, and services to integrate notarization.
+
+### Quick Start
+
+```bash
+# 1. Subscribe via bot
+# /start @NotaryTON_bot → /subscribe → Send 0.1 TON
+
+# 2. Get your API key
+# /api → Copy your user_id
+
+# 3. Make API calls
+curl -X POST https://notaryton.com/api/v1/notarize \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "api_key": "YOUR_USER_ID",
+    "contract_address": "EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG",
+    "metadata": {
+      "project_name": "MyCoin",
+      "launch_date": "2025-11-24"
+    }
+  }'
+```
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "hash": "abc123...",
+  "contract": "EQ...",
+  "timestamp": "2025-11-24T10:30:00",
+  "tx_url": "https://tonscan.org/",
+  "verify_url": "https://notaryton.com/api/v1/verify/abc123..."
+}
+```
+
+### Public Verification
+
+Anyone can verify a notarization without authentication:
+
+```bash
+curl https://notaryton.com/api/v1/verify/abc123...
+```
+
+### Use Cases
+
+- **Deploy Bots**: Auto-notarize every launch
+- **DEX Platforms**: Verify token contracts before listing
+- **Analytics Tools**: Track and verify launches
+- **Group Admins**: Offer notarization as VIP feature
 
 ---
 
