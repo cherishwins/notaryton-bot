@@ -1,0 +1,65 @@
+<!-- Telegram Login Widget for NotaryTON -->
+<!-- Embed this on notaryton.com for "Login with Telegram" functionality -->
+
+<script async src="https://telegram.org/js/telegram-widget.js?22"
+        data-telegram-login="NotaryTON_bot"
+        data-size="large"
+        data-radius="20"
+        data-onauth="onTelegramAuth(user)"
+        data-request-access="write">
+</script>
+
+<script type="text/javascript">
+  function onTelegramAuth(user) {
+    // Send user data to your backend for verification
+    fetch('/api/v1/telegram-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(user)
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        // Redirect to dashboard or show success
+        window.location.href = '/dashboard?user_id=' + user.id;
+      } else {
+        alert('Authentication failed. Please try again.');
+      }
+    })
+    .catch(error => {
+      console.error('Auth error:', error);
+      alert('Authentication error. Please try again.');
+    });
+  }
+</script>
+
+<!--
+USAGE NOTES:
+1. This widget is linked to @NotaryTON_bot via /setdomain in BotFather
+2. Domain: notaryton.com
+3. Users can click "Login with Telegram" to authenticate
+4. User data includes: id, first_name, last_name, username, photo_url, auth_date, hash
+5. Verify the hash server-side using HMAC-SHA-256 with bot token
+
+Server-side verification (Python):
+```python
+import hashlib
+import hmac
+
+def verify_telegram_auth(data: dict, bot_token: str) -> bool:
+    check_hash = data.pop('hash', None)
+    if not check_hash:
+        return False
+
+    # Sort and concatenate
+    data_check_string = '\n'.join([f"{k}={v}" for k, v in sorted(data.items())])
+
+    # Create secret key
+    secret_key = hashlib.sha256(bot_token.encode()).digest()
+
+    # Calculate HMAC
+    calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+
+    return calculated_hash == check_hash
+```
+-->

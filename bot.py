@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import Update
+from aiogram.types import Update, LabeledPrice, PreCheckoutQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 from dotenv import load_dotenv
 from pytoniq import LiteBalancer, WalletV4R2, Address
 import aiosqlite
@@ -26,6 +26,11 @@ GROUP_IDS = os.getenv("GROUP_IDS", "").split(",")  # Comma-separated chat IDs
 
 # Known deploy bots (add more as needed)
 DEPLOY_BOTS = ["@tondeployer", "@memelaunchbot", "@toncoinbot"]
+
+# Telegram Stars pricing (XTR currency)
+# 1 Star ≈ $0.013
+STARS_SINGLE_NOTARIZATION = 1   # 1 Star for single notarization
+STARS_MONTHLY_SUBSCRIPTION = 15  # 15 Stars for monthly unlimited (~$0.20)
 
 # Initialize bot and dispatcher
 bot = Bot(token=BOT_TOKEN)
@@ -362,7 +367,7 @@ async def cmd_start(message: types.Message):
         "🔐 **NotaryTON - Blockchain Infrastructure for TON**\n\n"
         "Auto-notarize memecoin launches with immutable on-chain proof.\n\n"
         "**Commands:**\n"
-        "• /subscribe - Unlimited notarizations (0.1 TON/month)\n"
+        "• /subscribe - Unlimited notarizations\n"
         "• /status - Your stats & subscription\n"
         "• /notarize - Manually notarize a contract\n"
         "• /api - Get API access for integrations\n"
@@ -371,10 +376,10 @@ async def cmd_start(message: types.Message):
         "✅ Auto-notarization in groups\n"
         "✅ Public API for third-party bots\n"
         "✅ Batch operations for high volume\n"
-        "✅ Instant verification\n\n"
+        "✅ Instant verification via inline mode\n\n"
         "💰 **Pricing:**\n"
-        "• 0.001 TON per notarization\n"
-        "• 0.1 TON/month unlimited\n\n"
+        "• ⭐ 1 Star OR 💎 0.001 TON per seal\n"
+        "• ⭐ 15 Stars OR 💎 0.1 TON/month unlimited\n\n"
         "🚀 **Become Infrastructure** - Every TON launch verified here."
     )
     
@@ -383,17 +388,242 @@ async def cmd_start(message: types.Message):
 @dp.message(Command("subscribe"))
 async def cmd_subscribe(message: types.Message):
     user_id = message.from_user.id
+
+    # Create inline keyboard with payment options
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="⭐ Pay with Stars (15 Stars)", callback_data="pay_stars_sub")],
+        [types.InlineKeyboardButton(text="💎 Pay with TON (0.1 TON)", callback_data="pay_ton_sub")]
+    ])
+
     await message.answer(
         f"💎 **Unlimited Monthly Subscription**\n\n"
-        f"**Price:** 0.1 TON (~$0.18)\n"
         f"**Benefits:** Unlimited notarizations for 30 days\n\n"
-        f"**To activate:**\n"
-        f"Send 0.1 TON to:\n"
+        f"**Choose Payment Method:**\n"
+        f"⭐ **Telegram Stars:** 15 Stars (~$0.20)\n"
+        f"💎 **TON:** 0.1 TON (~$0.18)\n\n"
+        f"Tap a button below to pay:",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
+
+@dp.callback_query(F.data == "pay_stars_sub")
+async def process_stars_subscription(callback: types.CallbackQuery):
+    """Send Stars invoice for subscription"""
+    await callback.answer()
+
+    prices = [LabeledPrice(label="Monthly Unlimited", amount=STARS_MONTHLY_SUBSCRIPTION)]
+
+    await callback.message.answer_invoice(
+        title="NotaryTON Monthly Subscription",
+        description="Unlimited notarizations for 30 days. Seal contracts, files, and more on TON blockchain.",
+        payload=f"subscription_{callback.from_user.id}",
+        currency="XTR",  # Telegram Stars
+        prices=prices,
+        provider_token="",  # Empty for Stars
+    )
+
+
+@dp.callback_query(F.data == "pay_ton_sub")
+async def process_ton_subscription(callback: types.CallbackQuery):
+    """Show TON payment instructions"""
+    user_id = callback.from_user.id
+    await callback.answer()
+
+    await callback.message.answer(
+        f"💎 **Pay with TON**\n\n"
+        f"Send **0.1 TON** to:\n"
         f"`{SERVICE_TON_WALLET}`\n\n"
-        f"Include your user ID in memo: `{user_id}`\n\n"
-        f"Your subscription will activate within 1 minute!",
+        f"**IMPORTANT:** Include this memo:\n"
+        f"`{user_id}`\n\n"
+        f"Your subscription activates automatically within 1 minute!",
         parse_mode="Markdown"
     )
+
+
+@dp.callback_query(F.data == "pay_stars_single")
+async def process_stars_single(callback: types.CallbackQuery):
+    """Send Stars invoice for single notarization"""
+    await callback.answer()
+
+    prices = [LabeledPrice(label="Single Notarization", amount=STARS_SINGLE_NOTARIZATION)]
+
+    await callback.message.answer_invoice(
+        title="Single Notarization",
+        description="Notarize one contract or file on TON blockchain forever.",
+        payload=f"single_{callback.from_user.id}",
+        currency="XTR",  # Telegram Stars
+        prices=prices,
+        provider_token="",  # Empty for Stars
+    )
+
+
+@dp.callback_query(F.data == "pay_ton_single")
+async def process_ton_single(callback: types.CallbackQuery):
+    """Show TON payment instructions for single notarization"""
+    user_id = callback.from_user.id
+    await callback.answer()
+
+    await callback.message.answer(
+        f"💎 **Pay with TON**\n\n"
+        f"Send **0.001 TON** to:\n"
+        f"`{SERVICE_TON_WALLET}`\n\n"
+        f"**IMPORTANT:** Include this memo:\n"
+        f"`{user_id}`\n\n"
+        f"Your credit will be added automatically within 1 minute!\n"
+        f"Then use /notarize again.",
+        parse_mode="Markdown"
+    )
+
+
+# ========================
+# INLINE QUERY HANDLER (for @NotaryTON_bot <hash> in any chat)
+# ========================
+
+@dp.inline_query()
+async def process_inline_query(inline_query: InlineQuery):
+    """Handle inline queries - users type @NotaryTON_bot <hash> to verify"""
+    query_text = inline_query.query.strip()
+
+    results = []
+
+    if not query_text:
+        # No query - show instructions
+        results.append(
+            InlineQueryResultArticle(
+                id="help",
+                title="🔍 Verify a Notarization",
+                description="Enter a contract hash to verify its notarization status",
+                input_message_content=InputTextMessageContent(
+                    message_text="🔐 **NotaryTON Verification**\n\nTo verify a notarization, type:\n`@NotaryTON_bot <contract_hash>`\n\n🌐 Or visit: https://notaryton.com",
+                    parse_mode="Markdown"
+                )
+            )
+        )
+    else:
+        # Query provided - look up the hash
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute("""
+                    SELECT tx_hash, timestamp, contract_hash
+                    FROM notarizations
+                    WHERE contract_hash LIKE ?
+                    ORDER BY timestamp DESC
+                    LIMIT 5
+                """, (f"{query_text}%",)) as cursor:
+                    rows = await cursor.fetchall()
+
+                    if rows:
+                        for i, row in enumerate(rows):
+                            tx_hash, timestamp, contract_hash = row
+                            results.append(
+                                InlineQueryResultArticle(
+                                    id=f"result_{i}",
+                                    title=f"✅ Verified: {contract_hash[:16]}...",
+                                    description=f"Notarized on {timestamp}",
+                                    input_message_content=InputTextMessageContent(
+                                        message_text=f"✅ **VERIFIED NOTARIZATION**\n\n"
+                                                     f"🔐 Hash: `{contract_hash}`\n"
+                                                     f"📅 Timestamp: {timestamp}\n"
+                                                     f"⛓️ Blockchain: TON\n\n"
+                                                     f"🔗 Verify: https://notaryton.com/api/v1/verify/{contract_hash}",
+                                        parse_mode="Markdown"
+                                    )
+                                )
+                            )
+                    else:
+                        results.append(
+                            InlineQueryResultArticle(
+                                id="not_found",
+                                title=f"❌ Not Found: {query_text[:16]}...",
+                                description="No notarization found for this hash",
+                                input_message_content=InputTextMessageContent(
+                                    message_text=f"❌ **NOT FOUND**\n\n"
+                                                 f"No notarization found for:\n`{query_text}`\n\n"
+                                                 f"🔐 Want to notarize? Use @NotaryTON_bot",
+                                    parse_mode="Markdown"
+                                )
+                            )
+                        )
+        except Exception as e:
+            print(f"Inline query error: {e}")
+            results.append(
+                InlineQueryResultArticle(
+                    id="error",
+                    title="⚠️ Error",
+                    description="Could not process query",
+                    input_message_content=InputTextMessageContent(
+                        message_text="⚠️ Error processing verification. Try again or visit https://notaryton.com"
+                    )
+                )
+            )
+
+    await inline_query.answer(results, cache_time=60)
+
+
+# ========================
+# TELEGRAM STARS PAYMENT HANDLERS
+# ========================
+
+@dp.pre_checkout_query()
+async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
+    """Handle pre-checkout query - must respond within 10 seconds"""
+    # Always approve - Stars payments are instant and reliable
+    await pre_checkout_query.answer(ok=True)
+
+
+@dp.message(F.successful_payment)
+async def process_successful_payment(message: types.Message):
+    """Handle successful Stars payment"""
+    user_id = message.from_user.id
+    payment = message.successful_payment
+    payload = payment.invoice_payload
+
+    # Log the payment
+    print(f"✅ Stars payment received: {payment.total_amount} XTR from user {user_id}, payload: {payload}")
+
+    if payload.startswith("subscription_"):
+        # Activate subscription
+        await add_subscription(user_id, months=1)
+
+        # Update total paid (convert Stars to approximate TON value)
+        stars_value_ton = payment.total_amount * 0.001  # Rough conversion
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                UPDATE users SET total_paid = total_paid + ? WHERE user_id = ?
+            """, (stars_value_ton, user_id))
+            await db.commit()
+
+        await message.answer(
+            "✅ **Subscription Activated!**\n\n"
+            "You now have **unlimited notarizations** for 30 days!\n\n"
+            "Use /notarize to seal your first contract.\n"
+            "Use /api to get API access for integrations.\n\n"
+            "🔒 Thank you for supporting NotaryTON!",
+            parse_mode="Markdown"
+        )
+
+    elif payload.startswith("single_"):
+        # Add single notarization credit
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                INSERT OR IGNORE INTO users (user_id) VALUES (?)
+            """, (user_id,))
+            await db.execute("""
+                UPDATE users SET total_paid = total_paid + 0.001 WHERE user_id = ?
+            """, (user_id,))
+            await db.commit()
+
+        await message.answer(
+            "✅ **Payment Received!**\n\n"
+            "You can now notarize **one contract or file**.\n\n"
+            "Send me:\n"
+            "• A contract address (EQ...)\n"
+            "• Or upload a file\n\n"
+            "🔒 I'll seal it on TON blockchain forever!",
+            parse_mode="Markdown"
+        )
+
 
 @dp.message(Command("status"))
 async def cmd_status(message: types.Message):
@@ -528,12 +758,21 @@ async def cmd_notarize(message: types.Message):
                     has_credit = True
 
     if not has_sub and not has_credit:
+        # Offer payment options
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="⭐ Pay 1 Star", callback_data="pay_stars_single")],
+            [types.InlineKeyboardButton(text="💎 Pay 0.001 TON", callback_data="pay_ton_single")],
+            [types.InlineKeyboardButton(text="🚀 Unlimited (15 Stars/mo)", callback_data="pay_stars_sub")]
+        ])
+
         await message.answer(
             "⚠️ **Payment Required**\n\n"
-            f"Send 0.001 TON to: `{SERVICE_TON_WALLET}`\n"
-            f"Include your user ID in memo: `{user_id}`\n\n"
-            f"Or use /subscribe for unlimited access (0.1 TON)!",
-            parse_mode="Markdown"
+            "Choose how to pay for this notarization:\n\n"
+            "⭐ **1 Star** - Quick & easy\n"
+            "💎 **0.001 TON** - Native crypto\n"
+            "🚀 **15 Stars/mo** - Unlimited access\n",
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
         return
 
@@ -626,9 +865,20 @@ async def handle_document(message: types.Message):
                     has_credit = True
 
     if not has_sub and not has_credit:
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="⭐ Pay 1 Star", callback_data="pay_stars_single")],
+            [types.InlineKeyboardButton(text="💎 Pay 0.001 TON", callback_data="pay_ton_single")],
+            [types.InlineKeyboardButton(text="🚀 Unlimited (15 Stars/mo)", callback_data="pay_stars_sub")]
+        ])
+
         await message.answer(
-            f"⚠️ Send 0.001 TON to `{SERVICE_TON_WALLET}` (memo: `{user_id}`) first!",
-            parse_mode="Markdown"
+            "⚠️ **Payment Required to Notarize**\n\n"
+            "Choose how to pay:\n\n"
+            "⭐ **1 Star** - Quick & easy\n"
+            "💎 **0.001 TON** - Native crypto\n"
+            "🚀 **15 Stars/mo** - Unlimited access\n",
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
         return
 

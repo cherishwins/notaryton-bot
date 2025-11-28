@@ -48,7 +48,8 @@
 
 ## 🛠️ Tech Stack
 
-- **Bot Framework**: aiogram 3.4.1 (Telegram)
+- **Python**: 3.11
+- **Bot Framework**: aiogram 3.15+ (Telegram)
 - **Web Server**: FastAPI + uvicorn
 - **Blockchain**: pytoniq (TON)
 - **Database**: SQLite (aiosqlite)
