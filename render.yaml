@@ -14,7 +14,7 @@ services:
       - key: SERVICE_TON_WALLET
         sync: false
       - key: WEBHOOK_URL
-        value: https://notaryton.onrender.com
+        value: https://notaryton.com
       - key: GROUP_IDS
         value: ""
     healthCheckPath: /
