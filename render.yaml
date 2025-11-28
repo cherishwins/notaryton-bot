@@ -18,4 +18,4 @@ services:
         value: https://notaryton.com
       - key: GROUP_IDS
         value: ""
-    healthCheckPath: /
+    healthCheckPath: /health

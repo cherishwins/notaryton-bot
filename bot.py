@@ -685,10 +685,86 @@ async def webhook_handler(request: Request):
     await dp.feed_update(bot, update)
     return {"ok": True}
 
-@app.get("/")
+@app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "running", "bot": "NotaryTON", "version": "2.0-memecoin"}
+
+from fastapi.responses import HTMLResponse
+
+@app.get("/", response_class=HTMLResponse)
+async def landing_page():
+    """Marketing landing page"""
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NotaryTON - Blockchain Notarization on TON</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0f3460 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container { max-width: 600px; text-align: center; }
+        .logo { font-size: 4rem; margin-bottom: 20px; }
+        h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #00d4ff, #7b2cbf); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .tagline { font-size: 1.3rem; color: #aaa; margin-bottom: 30px; }
+        .features { text-align: left; margin: 30px 0; }
+        .feature { display: flex; align-items: center; margin: 15px 0; font-size: 1.1rem; }
+        .feature span { margin-right: 15px; font-size: 1.5rem; }
+        .cta {
+            display: inline-block;
+            background: linear-gradient(90deg, #0088cc, #00d4ff);
+            color: #fff;
+            padding: 18px 40px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-top: 20px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .cta:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,136,204,0.4); }
+        .price { margin-top: 30px; color: #888; }
+        .price strong { color: #00d4ff; font-size: 1.3rem; }
+        footer { margin-top: 50px; color: #555; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🔐</div>
+        <h1>NotaryTON</h1>
+        <p class="tagline">Seal any file on TON blockchain. Instant. Immutable. Forever.</p>
+
+        <div class="features">
+            <div class="feature"><span>⚡</span> Instant blockchain notarization</div>
+            <div class="feature"><span>🔒</span> Immutable proof of existence</div>
+            <div class="feature"><span>📄</span> Works with any file or contract</div>
+            <div class="feature"><span>🤖</span> Simple Telegram bot interface</div>
+            <div class="feature"><span>🔌</span> API for developers & integrations</div>
+        </div>
+
+        <a href="https://t.me/NotaryTON_bot" class="cta">🚀 Start Notarizing</a>
+
+        <p class="price">Starting at <strong>0.001 TON</strong> per notarization (~$0.005)</p>
+
+        <footer>
+            <p>Powered by TON Blockchain</p>
+        </footer>
+    </div>
+</body>
+</html>
+"""
 
 # ========================
 # PUBLIC API ENDPOINTS (Make NotaryTON essential infrastructure)
