@@ -1230,10 +1230,9 @@ async def on_startup():
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    """Delete webhook on shutdown"""
-    await bot.delete_webhook()
+    """Cleanup on shutdown - DO NOT delete webhook (causes issues with Render restarts)"""
     await bot.session.close()
-    print("🛑 Webhook deleted")
+    print("🛑 Bot session closed (webhook preserved)")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
