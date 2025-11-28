@@ -947,6 +947,329 @@ async def health_check():
 
 from fastapi.responses import HTMLResponse
 
+@app.get("/memeseal", response_class=HTMLResponse)
+async def memeseal_landing():
+    """MemeSeal TON - Degen landing page"""
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MemeSeal TON ⚡🐸 - Proof or it didn't happen</title>
+    <meta name="description" content="Seal your bags before the rug. Instant on-chain proof on TON. 1 Star or 0.001 TON per seal.">
+    <meta property="og:title" content="MemeSeal TON ⚡🐸">
+    <meta property="og:description" content="Seal your bags before the rug. Instant. Immutable. Forever.">
+    <meta property="og:image" content="https://notaryton.com/static/memeseal_banner.png">
+    <link rel="icon" type="image/png" href="/static/memeseal_icon.png">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Space Mono', monospace;
+            background: #0a0a0f;
+            color: #00ff88;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        .hero {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+            text-align: center;
+            background: radial-gradient(ellipse at center, #0d1f1a 0%, #0a0a0f 70%);
+        }
+        .banner {
+            max-width: 800px;
+            width: 100%;
+            border-radius: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 0 60px rgba(0,255,136,0.3);
+            border: 2px solid #00ff88;
+        }
+        h1 {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 2rem;
+            color: #00ff88;
+            text-shadow: 0 0 20px #00ff88, 0 0 40px #00ff88;
+            margin-bottom: 15px;
+        }
+        .tagline {
+            font-size: 1.3rem;
+            color: #88ffbb;
+            margin-bottom: 10px;
+        }
+        .subtagline {
+            font-size: 1rem;
+            color: #666;
+            margin-bottom: 40px;
+        }
+        .cta {
+            display: inline-block;
+            background: linear-gradient(135deg, #00ff88 0%, #00cc6a 100%);
+            color: #000;
+            padding: 20px 50px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-size: 1.2rem;
+            font-weight: 700;
+            font-family: 'Press Start 2P', cursive;
+            transition: all 0.3s;
+            box-shadow: 0 0 30px rgba(0,255,136,0.5);
+            border: none;
+            cursor: pointer;
+        }
+        .cta:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 50px rgba(0,255,136,0.8);
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            max-width: 1000px;
+            margin: 50px auto;
+            padding: 0 20px;
+        }
+        .feature {
+            background: linear-gradient(180deg, #111 0%, #0a0a0f 100%);
+            border: 1px solid #00ff8833;
+            padding: 30px;
+            border-radius: 16px;
+            text-align: left;
+        }
+        .feature:hover {
+            border-color: #00ff88;
+            box-shadow: 0 0 30px rgba(0,255,136,0.2);
+        }
+        .feature h3 {
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            color: #00ff88;
+        }
+        .feature p {
+            color: #888;
+            line-height: 1.6;
+        }
+        .pricing {
+            padding: 60px 20px;
+            text-align: center;
+            background: #080810;
+        }
+        .pricing h2 {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1.3rem;
+            margin-bottom: 15px;
+            color: #00ff88;
+        }
+        .pricing-sub {
+            color: #666;
+            margin-bottom: 40px;
+        }
+        .price-cards {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+        .price-card {
+            background: #111;
+            border: 2px solid #222;
+            border-radius: 20px;
+            padding: 35px;
+            width: 300px;
+            transition: all 0.3s;
+        }
+        .price-card:hover {
+            border-color: #00ff88;
+            transform: translateY(-5px);
+        }
+        .price-card.featured {
+            border-color: #00ff88;
+            box-shadow: 0 0 40px rgba(0,255,136,0.3);
+        }
+        .price-card h3 {
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            color: #fff;
+        }
+        .price-card .price {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1.5rem;
+            color: #00ff88;
+            margin-bottom: 10px;
+        }
+        .price-card .price-alt {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+        }
+        .price-card ul {
+            list-style: none;
+            text-align: left;
+        }
+        .price-card li {
+            padding: 10px 0;
+            color: #888;
+            border-bottom: 1px solid #222;
+        }
+        .price-card li:before {
+            content: "✓ ";
+            color: #00ff88;
+        }
+        .price-card li:last-child {
+            border-bottom: none;
+        }
+        .dev-section {
+            padding: 60px 20px;
+            text-align: center;
+            background: linear-gradient(180deg, #0a0a0f 0%, #0d1510 100%);
+        }
+        .dev-section h2 {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1.1rem;
+            color: #00ff88;
+            margin-bottom: 20px;
+        }
+        .dev-section p {
+            color: #888;
+            max-width: 600px;
+            margin: 0 auto 30px;
+            line-height: 1.6;
+        }
+        .code-block {
+            background: #000;
+            border: 1px solid #00ff8833;
+            border-radius: 10px;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+            text-align: left;
+            overflow-x: auto;
+        }
+        .code-block code {
+            color: #00ff88;
+            font-size: 0.85rem;
+        }
+        footer {
+            background: #000;
+            color: #444;
+            padding: 40px 20px;
+            text-align: center;
+            border-top: 1px solid #111;
+        }
+        footer a {
+            color: #00ff88;
+            text-decoration: none;
+        }
+        .badge {
+            display: inline-block;
+            background: #00ff8822;
+            color: #00ff88;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            margin-top: 20px;
+            border: 1px solid #00ff8844;
+        }
+        .glow-text {
+            text-shadow: 0 0 10px currentColor;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .pulse { animation: pulse 2s infinite; }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <img src="/static/memeseal_banner.png" alt="MemeSeal TON" class="banner">
+        <h1>MEMESEAL TON ⚡🐸</h1>
+        <p class="tagline">Seal your bags before the rug.</p>
+        <p class="subtagline">One tap = on-chain proof you were early. No more "bro trust me" screenshots.</p>
+        <a href="https://t.me/MemeSealTON_bot" class="cta">START SEALING</a>
+        <span class="badge">🔥 Costs less than a failed tx → 0.001 TON</span>
+    </div>
+
+    <div class="features">
+        <div class="feature">
+            <h3>⚡ Instant Hash on TON</h3>
+            <p>Under 1 second. Your screenshot, wallet connect, voice note - whatever - gets sealed on-chain forever.</p>
+        </div>
+        <div class="feature">
+            <h3>🔗 Permanent Verification</h3>
+            <p>Anyone can check. No login, no KYC, no cope. Just paste the hash and see the proof.</p>
+        </div>
+        <div class="feature">
+            <h3>🤖 Auto-Seal in Groups</h3>
+            <p>Add @MemeSealTON_bot to your raid channel. Every coin drop = auto-sealed with timestamp. Dev can't deny fair launch.</p>
+        </div>
+        <div class="feature">
+            <h3>💰 5% Referral Forever</h3>
+            <p>Plug it into your pump clone, DEX, sniper bot. When your users seal through your link → you eat forever.</p>
+        </div>
+    </div>
+
+    <div class="pricing">
+        <h2>DEGEN PRICING</h2>
+        <p class="pricing-sub">no subscription bullshit unless you want it</p>
+        <div class="price-cards">
+            <div class="price-card">
+                <h3>Pay As You Go</h3>
+                <div class="price">1 ⭐ STAR</div>
+                <div class="price-alt">or 0.001 TON (~$0.05)</div>
+                <ul>
+                    <li>Single seal</li>
+                    <li>Instant on-chain proof</li>
+                    <li>Permanent verify link</li>
+                    <li>Perfect for 47 coins before breakfast</li>
+                </ul>
+            </div>
+            <div class="price-card featured">
+                <h3>Unlimited Monthly</h3>
+                <div class="price">15 ⭐ STARS</div>
+                <div class="price-alt">or 0.1 TON (~$0.50)</div>
+                <ul>
+                    <li>Unlimited seals</li>
+                    <li>API access included</li>
+                    <li>Batch operations</li>
+                    <li>For real cookers who launch daily</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="dev-section">
+        <h2>DEVELOPERS / COOKERS</h2>
+        <p>Public REST API + 5% referral kickback. Plug it into your pump.fun clone, your DEX, your sniper bot.</p>
+        <div class="code-block">
+            <code>
+POST /api/v1/notarize<br>
+{<br>
+&nbsp;&nbsp;"api_key": "your_telegram_id",<br>
+&nbsp;&nbsp;"contract_address": "EQ...",<br>
+&nbsp;&nbsp;"metadata": {"coin": "FROG420"}<br>
+}
+            </code>
+        </div>
+        <a href="/docs" class="badge" style="margin-top: 30px; text-decoration: none;">📚 Full API Docs</a>
+    </div>
+
+    <footer>
+        <p>Powered by TON | Built for degens | Will never rug you</p>
+        <p style="margin-top: 15px;">
+            <a href="https://t.me/MemeSealTON_bot">Start Sealing</a> |
+            <a href="https://t.me/JPandaJamez">Support</a> |
+            <a href="/api/v1/verify/">Verify a Seal</a>
+        </p>
+        <p style="margin-top: 20px; font-size: 0.8rem;">© 2025 MemeSeal TON – receipts or GTFO 🐸</p>
+    </footer>
+</body>
+</html>
+"""
+
 @app.get("/", response_class=HTMLResponse)
 async def landing_page():
     """Marketing landing page"""
