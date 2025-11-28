@@ -2,6 +2,7 @@ services:
   - type: web
     name: notaryton-bot
     env: python
+    runtime: python-3.11.0
     buildCommand: pip install -r requirements.txt && pytest tests/ -v
     startCommand: python bot.py
     envVars:
