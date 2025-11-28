@@ -18,11 +18,13 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 # Load config
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+MEMESEAL_BOT_TOKEN = os.getenv("MEMESEAL_BOT_TOKEN")
 TON_CENTER_API_KEY = os.getenv("TON_CENTER_API_KEY")
 TON_WALLET_SECRET = os.getenv("TON_WALLET_SECRET")
 SERVICE_TON_WALLET = os.getenv("SERVICE_TON_WALLET")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://notaryton.com")
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+MEMESEAL_WEBHOOK_PATH = f"/webhook/{MEMESEAL_BOT_TOKEN}" if MEMESEAL_BOT_TOKEN else None
 GROUP_IDS = os.getenv("GROUP_IDS", "").split(",")  # Comma-separated chat IDs
 
 # Known deploy bots (add more as needed)
@@ -33,9 +35,14 @@ DEPLOY_BOTS = ["@tondeployer", "@memelaunchbot", "@toncoinbot"]
 STARS_SINGLE_NOTARIZATION = 1   # 1 Star for single notarization
 STARS_MONTHLY_SUBSCRIPTION = 15  # 15 Stars for monthly unlimited (~$0.20)
 
-# Initialize bot and dispatcher
+# Initialize bot and dispatcher (NotaryTON - professional)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
+# Initialize MemeSeal bot (degen branding) - shares same database/wallet
+memeseal_bot = Bot(token=MEMESEAL_BOT_TOKEN) if MEMESEAL_BOT_TOKEN else None
+memeseal_dp = Dispatcher() if MEMESEAL_BOT_TOKEN else None
+
 app = FastAPI()
 
 # Mount static files
@@ -930,15 +937,339 @@ async def handle_document(message: types.Message):
         pass
 
 # ========================
+# MEMESEAL TON HANDLERS (Degen branding)
+# ========================
+
+if memeseal_dp:
+    @memeseal_dp.message(Command("start"))
+    async def memeseal_start(message: types.Message):
+        user_id = message.from_user.id
+
+        # Check for promo code
+        promo_code = None
+        if message.text and len(message.text.split()) > 1:
+            promo_code = message.text.split()[1].upper()
+
+        # Create user if doesn't exist
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+            await db.commit()
+
+        # Check for CHIMPWIN promo (first 500 free seals)
+        free_seal_msg = ""
+        if promo_code == "CHIMPWIN":
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute("""
+                    UPDATE users SET total_paid = total_paid + 0.001 WHERE user_id = ?
+                """, (user_id,))
+                await db.commit()
+            free_seal_msg = "\n\n🎁 **PROMO ACTIVATED!** You got 1 free seal. LFG!"
+
+        welcome_msg = (
+            "⚡🐸 **MEMESEAL TON**\n\n"
+            "Seal your bags before the rug.\n"
+            "One tap = on-chain proof you were early.\n\n"
+            "**What you get:**\n"
+            "• Instant hash on TON (under 1 sec)\n"
+            "• Permanent verification link\n"
+            "• Works with screenshots, wallet connects, anything\n\n"
+            "**Commands:**\n"
+            "• /start - Seal something now\n"
+            "• /unlimited - Go infinite (0.1 TON/mo)\n"
+            "• /api - Dev docs + referral link\n"
+            "• /verify - Check any seal\n\n"
+            "💰 **Price:** 1 Star or 0.001 TON (~$0.05)\n\n"
+            "**Send me a file or screenshot to seal it forever!**\n\n"
+            "receipts or GTFO 🐸"
+            f"{free_seal_msg}"
+        )
+
+        await message.answer(welcome_msg, parse_mode="Markdown")
+
+    @memeseal_dp.message(Command("unlimited"))
+    async def memeseal_subscribe(message: types.Message):
+        user_id = message.from_user.id
+
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="⭐ 15 Stars - Go Unlimited", callback_data="ms_pay_stars_sub")],
+            [types.InlineKeyboardButton(text="💎 0.1 TON - Same thing", callback_data="ms_pay_ton_sub")]
+        ])
+
+        await message.answer(
+            "🚀 **UNLIMITED SEALS**\n\n"
+            "Stop counting. Start sealing everything.\n\n"
+            "**What you get:**\n"
+            "• Unlimited seals for 30 days\n"
+            "• API access included\n"
+            "• Batch operations\n"
+            "• Priority support (lol jk we respond to everyone)\n\n"
+            "**Price:** 15 Stars OR 0.1 TON\n\n"
+            "That's like... 2 failed txs on Solana.\n"
+            "Except this one actually works. 🐸",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+
+    @memeseal_dp.callback_query(F.data == "ms_pay_stars_sub")
+    async def memeseal_stars_sub(callback: types.CallbackQuery):
+        await callback.answer()
+        prices = [LabeledPrice(label="Unlimited Seals (30 days)", amount=STARS_MONTHLY_SUBSCRIPTION)]
+        await callback.message.answer_invoice(
+            title="MemeSeal Unlimited",
+            description="Seal everything. Forever. No limits for 30 days.",
+            payload=f"memeseal_sub_{callback.from_user.id}",
+            currency="XTR",
+            prices=prices,
+            provider_token="",
+        )
+
+    @memeseal_dp.callback_query(F.data == "ms_pay_ton_sub")
+    async def memeseal_ton_sub(callback: types.CallbackQuery):
+        user_id = callback.from_user.id
+        await callback.answer()
+        await callback.message.answer(
+            f"💎 **Pay with TON**\n\n"
+            f"Send **0.1 TON** to:\n"
+            f"`{SERVICE_TON_WALLET}`\n\n"
+            f"**Memo:** `{user_id}`\n\n"
+            f"Auto-activates in ~1 min. Then go seal everything. 🐸",
+            parse_mode="Markdown"
+        )
+
+    @memeseal_dp.callback_query(F.data == "ms_pay_stars_single")
+    async def memeseal_stars_single(callback: types.CallbackQuery):
+        await callback.answer()
+        prices = [LabeledPrice(label="Single Seal", amount=STARS_SINGLE_NOTARIZATION)]
+        await callback.message.answer_invoice(
+            title="Single Seal",
+            description="One seal. On-chain forever. Proof you were there.",
+            payload=f"memeseal_single_{callback.from_user.id}",
+            currency="XTR",
+            prices=prices,
+            provider_token="",
+        )
+
+    @memeseal_dp.callback_query(F.data == "ms_pay_ton_single")
+    async def memeseal_ton_single(callback: types.CallbackQuery):
+        user_id = callback.from_user.id
+        await callback.answer()
+        await callback.message.answer(
+            f"💎 **Pay with TON**\n\n"
+            f"Send **0.001 TON** to:\n"
+            f"`{SERVICE_TON_WALLET}`\n\n"
+            f"**Memo:** `{user_id}`\n\n"
+            f"Then send your file again. We'll seal it. 🐸",
+            parse_mode="Markdown"
+        )
+
+    @memeseal_dp.pre_checkout_query()
+    async def memeseal_pre_checkout(pre_checkout_query: PreCheckoutQuery):
+        await pre_checkout_query.answer(ok=True)
+
+    @memeseal_dp.message(F.successful_payment)
+    async def memeseal_payment_success(message: types.Message):
+        user_id = message.from_user.id
+        payment = message.successful_payment
+        payload = payment.invoice_payload
+
+        if "sub" in payload:
+            await add_subscription(user_id, months=1)
+            await message.answer(
+                "⚡ **YOU'RE UNLIMITED NOW** ⚡\n\n"
+                "30 days of infinite seals.\n"
+                "Send me anything - files, screenshots, contracts.\n"
+                "I'll seal them all.\n\n"
+                "LFG 🐸🚀",
+                parse_mode="Markdown"
+            )
+        else:
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+                await db.execute("UPDATE users SET total_paid = total_paid + 0.001 WHERE user_id = ?", (user_id,))
+                await db.commit()
+            await message.answer(
+                "✅ **PAID**\n\n"
+                "Now send me what you want sealed.\n"
+                "File, screenshot, whatever.\n\n"
+                "🐸",
+                parse_mode="Markdown"
+            )
+
+    @memeseal_dp.message(Command("api"))
+    async def memeseal_api(message: types.Message):
+        user_id = message.from_user.id
+        await message.answer(
+            f"🔧 **MEMESEAL API**\n\n"
+            f"**Your API Key:** `{user_id}`\n"
+            f"**Your Referral:** `https://t.me/MemeSealTON_bot?start=REF{user_id}`\n\n"
+            f"**Endpoints:**\n"
+            f"```\n"
+            f"POST /api/v1/notarize\n"
+            f"POST /api/v1/batch\n"
+            f"GET /api/v1/verify/{{hash}}\n"
+            f"```\n\n"
+            f"**5% referral** on all seals from your link. Forever.\n\n"
+            f"Docs: notaryton.com/memeseal",
+            parse_mode="Markdown"
+        )
+
+    @memeseal_dp.message(Command("verify"))
+    async def memeseal_verify(message: types.Message):
+        await message.answer(
+            "🔍 **VERIFY A SEAL**\n\n"
+            "Send me a hash to check if it's been sealed.\n\n"
+            "Or use inline mode:\n"
+            "`@MemeSealTON_bot <hash>`\n\n"
+            "in any chat to flex your receipts. 🐸",
+            parse_mode="Markdown"
+        )
+
+    @memeseal_dp.message(F.document)
+    async def memeseal_handle_document(message: types.Message):
+        user_id = message.from_user.id
+        has_sub = await get_user_subscription(user_id)
+
+        has_credit = False
+        if not has_sub:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute("SELECT total_paid FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row and row[0] >= 0.001:
+                        has_credit = True
+
+        if not has_sub and not has_credit:
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="⭐ 1 Star - Seal it", callback_data="ms_pay_stars_single")],
+                [types.InlineKeyboardButton(text="💎 0.001 TON", callback_data="ms_pay_ton_single")],
+                [types.InlineKeyboardButton(text="🚀 Go Unlimited", callback_data="ms_pay_stars_sub")]
+            ])
+            await message.answer(
+                "💰 **PAY TO SEAL**\n\n"
+                "1 Star or 0.001 TON.\n"
+                "That's it. Then it's on-chain forever.\n\n"
+                "Or go unlimited for 15 Stars. 🐸",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+            return
+
+        # Download and seal
+        file_id = message.document.file_id
+        file = await memeseal_bot.get_file(file_id)
+        file_path = f"downloads/{file_id}"
+        os.makedirs("downloads", exist_ok=True)
+        await memeseal_bot.download_file(file.file_path, file_path)
+
+        file_hash = hash_file(file_path)
+        comment = f"MemeSeal:{file_hash[:16]}"
+
+        try:
+            await send_ton_transaction(comment)
+            await log_notarization(user_id, "memeseal_file", file_hash, paid=True)
+
+            if not has_sub:
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute("UPDATE users SET total_paid = total_paid - 0.001 WHERE user_id = ?", (user_id,))
+                    await db.commit()
+
+            await message.answer(
+                f"⚡ **SEALED** ⚡\n\n"
+                f"File: `{message.document.file_name}`\n"
+                f"Hash: `{file_hash}`\n\n"
+                f"🔗 Verify: notaryton.com/api/v1/verify/{file_hash}\n\n"
+                f"On TON forever. Receipts secured. 🐸",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            await message.answer(f"❌ Seal failed: {str(e)}")
+
+        try:
+            os.remove(file_path)
+        except:
+            pass
+
+    @memeseal_dp.message(F.photo)
+    async def memeseal_handle_photo(message: types.Message):
+        """Handle screenshots/photos"""
+        user_id = message.from_user.id
+        has_sub = await get_user_subscription(user_id)
+
+        has_credit = False
+        if not has_sub:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute("SELECT total_paid FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row and row[0] >= 0.001:
+                        has_credit = True
+
+        if not has_sub and not has_credit:
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="⭐ 1 Star - Seal it", callback_data="ms_pay_stars_single")],
+                [types.InlineKeyboardButton(text="💎 0.001 TON", callback_data="ms_pay_ton_single")],
+                [types.InlineKeyboardButton(text="🚀 Go Unlimited", callback_data="ms_pay_stars_sub")]
+            ])
+            await message.answer(
+                "📸 **Nice screenshot!**\n\n"
+                "1 Star to seal it on TON forever.\n"
+                "Proof you were there. 🐸",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+            return
+
+        # Download largest photo
+        photo = message.photo[-1]
+        file = await memeseal_bot.get_file(photo.file_id)
+        file_path = f"downloads/{photo.file_id}.jpg"
+        os.makedirs("downloads", exist_ok=True)
+        await memeseal_bot.download_file(file.file_path, file_path)
+
+        file_hash = hash_file(file_path)
+        comment = f"MemeSeal:Screenshot:{file_hash[:12]}"
+
+        try:
+            await send_ton_transaction(comment)
+            await log_notarization(user_id, "memeseal_photo", file_hash, paid=True)
+
+            if not has_sub:
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute("UPDATE users SET total_paid = total_paid - 0.001 WHERE user_id = ?", (user_id,))
+                    await db.commit()
+
+            await message.answer(
+                f"⚡ **SCREENSHOT SEALED** ⚡\n\n"
+                f"Hash: `{file_hash}`\n\n"
+                f"🔗 Verify: notaryton.com/api/v1/verify/{file_hash}\n\n"
+                f"Proof secured. Now flex it. 🐸",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            await message.answer(f"❌ Seal failed: {str(e)}")
+
+        try:
+            os.remove(file_path)
+        except:
+            pass
+
+# ========================
 # FASTAPI ENDPOINTS
 # ========================
 
 @app.post(WEBHOOK_PATH)
 async def webhook_handler(request: Request):
-    """Handle incoming webhook updates from Telegram"""
+    """Handle incoming webhook updates from Telegram (NotaryTON)"""
     update = Update(**(await request.json()))
     await dp.feed_update(bot, update)
     return {"ok": True}
+
+# MemeSeal webhook endpoint
+if MEMESEAL_WEBHOOK_PATH:
+    @app.post(MEMESEAL_WEBHOOK_PATH)
+    async def memeseal_webhook_handler(request: Request):
+        """Handle incoming webhook updates from Telegram (MemeSeal)"""
+        update = Update(**(await request.json()))
+        await memeseal_dp.feed_update(memeseal_bot, update)
+        return {"ok": True}
 
 @app.get("/health")
 async def health_check():
@@ -1707,14 +2038,20 @@ async def stats():
 
 @app.on_event("startup")
 async def on_startup():
-    """Set webhook and join groups on startup"""
+    """Set webhooks for both bots on startup"""
     # Initialize database
     await init_db()
 
-    # Set webhook
+    # Set NotaryTON webhook
     webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
     await bot.set_webhook(webhook_url, drop_pending_updates=True)
-    print(f"✅ Webhook set to: {webhook_url}")
+    print(f"✅ NotaryTON webhook set to: {webhook_url}")
+
+    # Set MemeSeal webhook (if configured)
+    if memeseal_bot and MEMESEAL_WEBHOOK_PATH:
+        memeseal_webhook_url = f"{WEBHOOK_URL}{MEMESEAL_WEBHOOK_PATH}"
+        await memeseal_bot.set_webhook(memeseal_webhook_url, drop_pending_updates=True)
+        print(f"✅ MemeSeal webhook set to: {memeseal_webhook_url}")
 
     # Join groups
     for group_id in GROUP_IDS:
@@ -1734,7 +2071,9 @@ async def on_startup():
 async def on_shutdown():
     """Cleanup on shutdown - DO NOT delete webhook (causes issues with Render restarts)"""
     await bot.session.close()
-    print("🛑 Bot session closed (webhook preserved)")
+    if memeseal_bot:
+        await memeseal_bot.session.close()
+    print("🛑 Bot sessions closed (webhooks preserved)")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
