@@ -1278,6 +1278,229 @@ async def health_check():
 
 from fastapi.responses import HTMLResponse
 
+@app.get("/verify", response_class=HTMLResponse)
+async def verify_page():
+    """Public verification page - check any seal"""
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify a Seal - MemeSeal TON</title>
+    <meta name="description" content="Verify any seal on TON blockchain. Paste a hash to check if it's been sealed.">
+    <link rel="icon" type="image/png" href="/static/memeseal_icon.png">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Space Mono', monospace;
+            background: #0a0a0f;
+            color: #00ff88;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+        h1 {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1.5rem;
+            color: #00ff88;
+            text-shadow: 0 0 20px #00ff88;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 40px;
+        }
+        .search-box {
+            background: #111;
+            border: 2px solid #00ff8844;
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+        input[type="text"] {
+            width: 100%;
+            background: #000;
+            border: 1px solid #00ff8844;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.9rem;
+            color: #00ff88;
+            margin-bottom: 15px;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #00ff88;
+            box-shadow: 0 0 20px rgba(0,255,136,0.3);
+        }
+        input[type="text"]::placeholder {
+            color: #444;
+        }
+        button {
+            background: linear-gradient(135deg, #00ff88 0%, #00cc6a 100%);
+            color: #000;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 8px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 30px rgba(0,255,136,0.5);
+        }
+        #result {
+            background: #111;
+            border: 2px solid #222;
+            border-radius: 16px;
+            padding: 30px;
+            text-align: left;
+            display: none;
+        }
+        #result.show { display: block; }
+        #result.verified { border-color: #00ff88; }
+        #result.not-found { border-color: #ff4444; }
+        .result-header {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1rem;
+            margin-bottom: 20px;
+        }
+        .verified .result-header { color: #00ff88; }
+        .not-found .result-header { color: #ff4444; }
+        .result-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #222;
+        }
+        .result-row:last-child { border-bottom: none; }
+        .result-label { color: #666; }
+        .result-value {
+            color: #00ff88;
+            word-break: break-all;
+            text-align: right;
+            max-width: 60%;
+        }
+        .cta-link {
+            display: inline-block;
+            margin-top: 30px;
+            color: #00ff88;
+            text-decoration: none;
+            border: 1px solid #00ff88;
+            padding: 10px 20px;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        .cta-link:hover {
+            background: #00ff8822;
+        }
+        .logo {
+            width: 80px;
+            margin-bottom: 20px;
+        }
+        .loading {
+            color: #666;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img src="/static/memeseal_icon.png" alt="MemeSeal" class="logo">
+        <h1>🔍 VERIFY A SEAL</h1>
+        <p class="subtitle">Paste any hash to check if it's been sealed on TON</p>
+
+        <div class="search-box">
+            <input type="text" id="hashInput" placeholder="Paste hash here (e.g., a1b2c3d4e5f6...)" />
+            <button onclick="verifyHash()">VERIFY</button>
+        </div>
+
+        <div id="result"></div>
+
+        <a href="https://t.me/MemeSealTON_bot" class="cta-link">🐸 Seal something yourself</a>
+    </div>
+
+    <script>
+        async function verifyHash() {
+            const hash = document.getElementById('hashInput').value.trim();
+            const resultDiv = document.getElementById('result');
+
+            if (!hash) {
+                alert('Please enter a hash to verify');
+                return;
+            }
+
+            resultDiv.className = 'show';
+            resultDiv.innerHTML = '<p class="loading">Checking blockchain...</p>';
+
+            try {
+                const response = await fetch('/api/v1/verify/' + encodeURIComponent(hash));
+                const data = await response.json();
+
+                if (data.verified) {
+                    resultDiv.className = 'show verified';
+                    resultDiv.innerHTML = `
+                        <div class="result-header">✅ VERIFIED SEAL</div>
+                        <div class="result-row">
+                            <span class="result-label">Hash</span>
+                            <span class="result-value">${data.hash}</span>
+                        </div>
+                        <div class="result-row">
+                            <span class="result-label">Timestamp</span>
+                            <span class="result-value">${data.timestamp}</span>
+                        </div>
+                        <div class="result-row">
+                            <span class="result-label">Blockchain</span>
+                            <span class="result-value">${data.blockchain}</span>
+                        </div>
+                        <div class="result-row">
+                            <span class="result-label">Status</span>
+                            <span class="result-value">Sealed Forever 🔒</span>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.className = 'show not-found';
+                    resultDiv.innerHTML = `
+                        <div class="result-header">❌ NOT FOUND</div>
+                        <p style="color: #888; margin-top: 10px;">
+                            This hash hasn't been sealed yet.<br><br>
+                            Want to seal it? <a href="https://t.me/MemeSealTON_bot" style="color: #00ff88;">Use @MemeSealTON_bot</a>
+                        </p>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.className = 'show not-found';
+                resultDiv.innerHTML = `
+                    <div class="result-header">⚠️ ERROR</div>
+                    <p style="color: #888;">Could not verify. Try again.</p>
+                `;
+            }
+        }
+
+        // Allow Enter key to verify
+        document.getElementById('hashInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') verifyHash();
+        });
+    </script>
+</body>
+</html>
+"""
+
 @app.get("/memeseal", response_class=HTMLResponse)
 async def memeseal_landing():
     """MemeSeal TON - Degen landing page"""
@@ -1593,7 +1816,7 @@ POST /api/v1/notarize<br>
         <p style="margin-top: 15px;">
             <a href="https://t.me/MemeSealTON_bot">Start Sealing</a> |
             <a href="https://t.me/JPandaJamez">Support</a> |
-            <a href="/api/v1/verify/">Verify a Seal</a>
+            <a href="/verify">Verify a Seal</a>
         </p>
         <p style="margin-top: 20px; font-size: 0.8rem;">© 2025 MemeSeal TON – receipts or GTFO 🐸</p>
     </footer>
@@ -1842,7 +2065,7 @@ async def landing_page():
     </div>
 
     <footer>
-        <p>Powered by TON Blockchain | <a href="https://t.me/JPandaJamez">Support</a> | <a href="/api/v1/verify/">Verify a Hash</a></p>
+        <p>Powered by TON Blockchain | <a href="https://t.me/JPandaJamez">Support</a> | <a href="/verify">Verify a Hash</a></p>
         <p style="margin-top: 15px; font-size: 0.85rem;">© 2025 NotaryTON. All rights reserved.</p>
     </footer>
 </body>
