@@ -45,6 +45,10 @@ memeseal_dp = Dispatcher() if MEMESEAL_BOT_TOKEN else None
 
 app = FastAPI()
 
+# Global bot usernames (fetched on startup)
+BOT_USERNAME = "NotaryTON_bot"
+MEMESEAL_USERNAME = "MemeSealTON_bot"
+
 # Mount static files
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -156,6 +160,7 @@ def hash_data(data: bytes) -> str:
 
 async def get_contract_code_from_tx(tx_id: str) -> bytes:
     """Fetch contract bytecode from transaction"""
+    client = None
     try:
         client = LiteBalancer.from_mainnet_config(trust_level=1)
         await client.start_up()
@@ -174,26 +179,27 @@ async def get_contract_code_from_tx(tx_id: str) -> bytes:
             account = await client.get_account_state(address.to_str())
             if account and hasattr(account, 'code') and account.code:
                 code = account.code
-                await client.close_all()
                 return code if isinstance(code, bytes) else str(code).encode()
             else:
                 print(f"No code found for address: {tx_id}")
-                await client.close_all()
                 return b""
 
         except Exception as addr_error:
             print(f"Could not parse as address: {addr_error}")
             # If not an address, try to fetch as transaction hash
             # For now, return the tx_id itself as data to hash
-            await client.close_all()
             return tx_id.encode()
 
     except Exception as e:
         print(f"Error fetching contract code: {e}")
         return b""
+    finally:
+        if client:
+            await client.close_all()
 
 async def send_ton_transaction(comment: str, amount_ton: float = 0.001):
     """Send TON transaction with comment (notarization proof)"""
+    client = None
     try:
         client = LiteBalancer.from_mainnet_config(trust_level=1)
         await client.start_up()
@@ -209,19 +215,21 @@ async def send_ton_transaction(comment: str, amount_ton: float = 0.001):
         )
 
         print(f"✅ Notarization transaction sent with comment: {comment}")
-
-        await client.close_all()
         return result
     except Exception as e:
         print(f"❌ Error sending transaction: {e}")
         print(f"   Make sure wallet has sufficient TON balance")
         raise
+    finally:
+        if client:
+            await client.close_all()
 
 async def poll_wallet_for_payments():
     """Background task to poll wallet for incoming payments"""
     last_processed_lt = None  # Track last processed logical time
 
     while True:
+        client = None
         try:
             client = LiteBalancer.from_mainnet_config(trust_level=1)
             await client.start_up()
@@ -323,10 +331,11 @@ async def poll_wallet_for_payments():
             except Exception as tx_error:
                 print(f"Error processing transactions: {tx_error}")
 
-            await client.close_all()
-
         except Exception as e:
             print(f"Error polling wallet: {e}")
+        finally:
+            if client:
+                await client.close_all()
 
         await asyncio.sleep(30)  # Poll every 30 seconds
 
@@ -1281,7 +1290,7 @@ from fastapi.responses import HTMLResponse
 @app.get("/verify", response_class=HTMLResponse)
 async def verify_page():
     """Public verification page - check any seal"""
-    return """
+    return f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1292,8 +1301,8 @@ async def verify_page():
     <link rel="icon" type="image/png" href="/static/memeseal_icon.png">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap');
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
             font-family: 'Space Mono', monospace;
             background: #0a0a0f;
             color: #00ff88;
@@ -1302,31 +1311,31 @@ async def verify_page():
             flex-direction: column;
             align-items: center;
             padding: 40px 20px;
-        }
-        .container {
+        }}
+        .container {{
             max-width: 600px;
             width: 100%;
             text-align: center;
-        }
-        h1 {
+        }}
+        h1 {{
             font-family: 'Press Start 2P', cursive;
             font-size: 1.5rem;
             color: #00ff88;
             text-shadow: 0 0 20px #00ff88;
             margin-bottom: 10px;
-        }
-        .subtitle {
+        }}
+        .subtitle {{
             color: #666;
             margin-bottom: 40px;
-        }
-        .search-box {
+        }}
+        .search-box {{
             background: #111;
             border: 2px solid #00ff8844;
             border-radius: 16px;
             padding: 30px;
             margin-bottom: 30px;
-        }
-        input[type="text"] {
+        }}
+        input[type="text"] {{
             width: 100%;
             background: #000;
             border: 1px solid #00ff8844;
@@ -1336,16 +1345,16 @@ async def verify_page():
             font-size: 0.9rem;
             color: #00ff88;
             margin-bottom: 15px;
-        }
-        input[type="text"]:focus {
+        }}
+        input[type="text"]:focus {{
             outline: none;
             border-color: #00ff88;
             box-shadow: 0 0 20px rgba(0,255,136,0.3);
-        }
-        input[type="text"]::placeholder {
+        }}
+        input[type="text"]::placeholder {{
             color: #444;
-        }
-        button {
+        }}
+        button {{
             background: linear-gradient(135deg, #00ff88 0%, #00cc6a 100%);
             color: #000;
             border: none;
@@ -1355,44 +1364,44 @@ async def verify_page():
             font-size: 0.8rem;
             cursor: pointer;
             transition: all 0.3s;
-        }
-        button:hover {
+        }}
+        button:hover {{
             transform: scale(1.05);
             box-shadow: 0 0 30px rgba(0,255,136,0.5);
-        }
-        #result {
+        }}
+        #result {{
             background: #111;
             border: 2px solid #222;
             border-radius: 16px;
             padding: 30px;
             text-align: left;
             display: none;
-        }
-        #result.show { display: block; }
-        #result.verified { border-color: #00ff88; }
-        #result.not-found { border-color: #ff4444; }
-        .result-header {
+        }}
+        #result.show {{ display: block; }}
+        #result.verified {{ border-color: #00ff88; }}
+        #result.not-found {{ border-color: #ff4444; }}
+        .result-header {{
             font-family: 'Press Start 2P', cursive;
             font-size: 1rem;
             margin-bottom: 20px;
-        }
-        .verified .result-header { color: #00ff88; }
-        .not-found .result-header { color: #ff4444; }
-        .result-row {
+        }}
+        .verified .result-header {{ color: #00ff88; }}
+        .not-found .result-header {{ color: #ff4444; }}
+        .result-row {{
             display: flex;
             justify-content: space-between;
             padding: 10px 0;
             border-bottom: 1px solid #222;
-        }
-        .result-row:last-child { border-bottom: none; }
-        .result-label { color: #666; }
-        .result-value {
+        }}
+        .result-row:last-child {{ border-bottom: none; }}
+        .result-label {{ color: #666; }}
+        .result-value {{
             color: #00ff88;
             word-break: break-all;
             text-align: right;
             max-width: 60%;
-        }
-        .cta-link {
+        }}
+        .cta-link {{
             display: inline-block;
             margin-top: 30px;
             color: #00ff88;
@@ -1401,22 +1410,22 @@ async def verify_page():
             padding: 10px 20px;
             border-radius: 8px;
             transition: all 0.3s;
-        }
-        .cta-link:hover {
+        }}
+        .cta-link:hover {{
             background: #00ff8822;
-        }
-        .logo {
+        }}
+        .logo {{
             width: 80px;
             margin-bottom: 20px;
-        }
-        .loading {
+        }}
+        .loading {{
             color: #666;
             animation: pulse 1s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
+        }}
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.5; }}
+        }}
     </style>
 </head>
 <body>
@@ -1432,70 +1441,70 @@ async def verify_page():
 
         <div id="result"></div>
 
-        <a href="https://t.me/MemeSealTON_bot" class="cta-link">🐸 Seal something yourself</a>
+        <a href="https://t.me/{MEMESEAL_USERNAME}" class="cta-link">🐸 Seal something yourself</a>
     </div>
 
     <script>
-        async function verifyHash() {
+        async function verifyHash() {{
             const hash = document.getElementById('hashInput').value.trim();
             const resultDiv = document.getElementById('result');
 
-            if (!hash) {
+            if (!hash) {{
                 alert('Please enter a hash to verify');
                 return;
-            }
+            }}
 
             resultDiv.className = 'show';
             resultDiv.innerHTML = '<p class="loading">Checking blockchain...</p>';
 
-            try {
+            try {{
                 const response = await fetch('/api/v1/verify/' + encodeURIComponent(hash));
                 const data = await response.json();
 
-                if (data.verified) {
+                if (data.verified) {{
                     resultDiv.className = 'show verified';
                     resultDiv.innerHTML = `
                         <div class="result-header">✅ VERIFIED SEAL</div>
                         <div class="result-row">
                             <span class="result-label">Hash</span>
-                            <span class="result-value">${data.hash}</span>
+                            <span class="result-value">${{data.hash}}</span>
                         </div>
                         <div class="result-row">
                             <span class="result-label">Timestamp</span>
-                            <span class="result-value">${data.timestamp}</span>
+                            <span class="result-value">${{data.timestamp}}</span>
                         </div>
                         <div class="result-row">
                             <span class="result-label">Blockchain</span>
-                            <span class="result-value">${data.blockchain}</span>
+                            <span class="result-value">${{data.blockchain}}</span>
                         </div>
                         <div class="result-row">
                             <span class="result-label">Status</span>
                             <span class="result-value">Sealed Forever 🔒</span>
                         </div>
                     `;
-                } else {
+                }} else {{
                     resultDiv.className = 'show not-found';
                     resultDiv.innerHTML = `
                         <div class="result-header">❌ NOT FOUND</div>
                         <p style="color: #888; margin-top: 10px;">
                             This hash hasn't been sealed yet.<br><br>
-                            Want to seal it? <a href="https://t.me/MemeSealTON_bot" style="color: #00ff88;">Use @MemeSealTON_bot</a>
+                            Want to seal it? <a href="https://t.me/{MEMESEAL_USERNAME}" style="color: #00ff88;">Use @{MEMESEAL_USERNAME}</a>
                         </p>
                     `;
-                }
-            } catch (error) {
+                }}
+            }} catch (error) {{
                 resultDiv.className = 'show not-found';
                 resultDiv.innerHTML = `
                     <div class="result-header">⚠️ ERROR</div>
                     <p style="color: #888;">Could not verify. Try again.</p>
                 `;
-            }
-        }
+            }}
+        }}
 
         // Allow Enter key to verify
-        document.getElementById('hashInput').addEventListener('keypress', function(e) {
+        document.getElementById('hashInput').addEventListener('keypress', function(e) {{
             if (e.key === 'Enter') verifyHash();
-        });
+        }});
     </script>
 </body>
 </html>
@@ -1504,7 +1513,7 @@ async def verify_page():
 @app.get("/memeseal", response_class=HTMLResponse)
 async def memeseal_landing():
     """MemeSeal TON - Degen landing page"""
-    return """
+    return f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1518,48 +1527,48 @@ async def memeseal_landing():
     <link rel="icon" type="image/png" href="/static/memeseal_icon.png">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap');
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
             font-family: 'Space Mono', monospace;
             background: #0a0a0f;
             color: #00ff88;
             min-height: 100vh;
             overflow-x: hidden;
-        }
-        .hero {
+        }}
+        .hero {{
             display: flex;
             flex-direction: column;
             align-items: center;
             padding: 40px 20px;
             text-align: center;
             background: radial-gradient(ellipse at center, #0d1f1a 0%, #0a0a0f 70%);
-        }
-        .banner {
+        }}
+        .banner {{
             max-width: 800px;
             width: 100%;
             border-radius: 20px;
             margin-bottom: 30px;
             box-shadow: 0 0 60px rgba(0,255,136,0.3);
             border: 2px solid #00ff88;
-        }
-        h1 {
+        }}
+        h1 {{
             font-family: 'Press Start 2P', cursive;
             font-size: 2rem;
             color: #00ff88;
             text-shadow: 0 0 20px #00ff88, 0 0 40px #00ff88;
             margin-bottom: 15px;
-        }
-        .tagline {
+        }}
+        .tagline {{
             font-size: 1.3rem;
             color: #88ffbb;
             margin-bottom: 10px;
-        }
-        .subtagline {
+        }}
+        .subtagline {{
             font-size: 1rem;
             color: #666;
             margin-bottom: 40px;
-        }
-        .cta {
+        }}
+        .cta {{
             display: inline-block;
             background: linear-gradient(135deg, #00ff88 0%, #00cc6a 100%);
             color: #000;
@@ -1573,126 +1582,126 @@ async def memeseal_landing():
             box-shadow: 0 0 30px rgba(0,255,136,0.5);
             border: none;
             cursor: pointer;
-        }
-        .cta:hover {
+        }}
+        .cta:hover {{
             transform: scale(1.05);
             box-shadow: 0 0 50px rgba(0,255,136,0.8);
-        }
-        .features {
+        }}
+        .features {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
             gap: 25px;
             max-width: 1000px;
             margin: 50px auto;
             padding: 0 20px;
-        }
-        .feature {
+        }}
+        .feature {{
             background: linear-gradient(180deg, #111 0%, #0a0a0f 100%);
             border: 1px solid #00ff8833;
             padding: 30px;
             border-radius: 16px;
             text-align: left;
-        }
-        .feature:hover {
+        }}
+        .feature:hover {{
             border-color: #00ff88;
             box-shadow: 0 0 30px rgba(0,255,136,0.2);
-        }
-        .feature h3 {
+        }}
+        .feature h3 {{
             font-size: 1.1rem;
             margin-bottom: 15px;
             color: #00ff88;
-        }
-        .feature p {
+        }}
+        .feature p {{
             color: #888;
             line-height: 1.6;
-        }
-        .pricing {
+        }}
+        .pricing {{
             padding: 60px 20px;
             text-align: center;
             background: #080810;
-        }
-        .pricing h2 {
+        }}
+        .pricing h2 {{
             font-family: 'Press Start 2P', cursive;
             font-size: 1.3rem;
             margin-bottom: 15px;
             color: #00ff88;
-        }
-        .pricing-sub {
+        }}
+        .pricing-sub {{
             color: #666;
             margin-bottom: 40px;
-        }
-        .price-cards {
+        }}
+        .price-cards {{
             display: flex;
             justify-content: center;
             gap: 30px;
             flex-wrap: wrap;
-        }
-        .price-card {
+        }}
+        .price-card {{
             background: #111;
             border: 2px solid #222;
             border-radius: 20px;
             padding: 35px;
             width: 300px;
             transition: all 0.3s;
-        }
-        .price-card:hover {
+        }}
+        .price-card:hover {{
             border-color: #00ff88;
             transform: translateY(-5px);
-        }
-        .price-card.featured {
+        }}
+        .price-card.featured {{
             border-color: #00ff88;
             box-shadow: 0 0 40px rgba(0,255,136,0.3);
-        }
-        .price-card h3 {
+        }}
+        .price-card h3 {{
             font-size: 1.2rem;
             margin-bottom: 15px;
             color: #fff;
-        }
-        .price-card .price {
+        }}
+        .price-card .price {{
             font-family: 'Press Start 2P', cursive;
             font-size: 1.5rem;
             color: #00ff88;
             margin-bottom: 10px;
-        }
-        .price-card .price-alt {
+        }}
+        .price-card .price-alt {{
             color: #666;
             font-size: 0.9rem;
             margin-bottom: 20px;
-        }
-        .price-card ul {
+        }}
+        .price-card ul {{
             list-style: none;
             text-align: left;
-        }
-        .price-card li {
+        }}
+        .price-card li {{
             padding: 10px 0;
             color: #888;
             border-bottom: 1px solid #222;
-        }
-        .price-card li:before {
+        }}
+        .price-card li:before {{
             content: "✓ ";
             color: #00ff88;
-        }
-        .price-card li:last-child {
+        }}
+        .price-card li:last-child {{
             border-bottom: none;
-        }
-        .dev-section {
+        }}
+        .dev-section {{
             padding: 60px 20px;
             text-align: center;
             background: linear-gradient(180deg, #0a0a0f 0%, #0d1510 100%);
-        }
-        .dev-section h2 {
+        }}
+        .dev-section h2 {{
             font-family: 'Press Start 2P', cursive;
             font-size: 1.1rem;
             color: #00ff88;
             margin-bottom: 20px;
-        }
-        .dev-section p {
+        }}
+        .dev-section p {{
             color: #888;
             max-width: 600px;
             margin: 0 auto 30px;
             line-height: 1.6;
-        }
-        .code-block {
+        }}
+        .code-block {{
             background: #000;
             border: 1px solid #00ff8833;
             border-radius: 10px;
@@ -1701,23 +1710,23 @@ async def memeseal_landing():
             margin: 0 auto;
             text-align: left;
             overflow-x: auto;
-        }
-        .code-block code {
+        }}
+        .code-block code {{
             color: #00ff88;
             font-size: 0.85rem;
-        }
-        footer {
+        }}
+        footer {{
             background: #000;
             color: #444;
             padding: 40px 20px;
             text-align: center;
             border-top: 1px solid #111;
-        }
-        footer a {
+        }}
+        footer a {{
             color: #00ff88;
             text-decoration: none;
-        }
-        .badge {
+        }}
+        .badge {{
             display: inline-block;
             background: #00ff8822;
             color: #00ff88;
@@ -1726,15 +1735,15 @@ async def memeseal_landing():
             font-size: 0.85rem;
             margin-top: 20px;
             border: 1px solid #00ff8844;
-        }
-        .glow-text {
+        }}
+        .glow-text {{
             text-shadow: 0 0 10px currentColor;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
-        }
-        .pulse { animation: pulse 2s infinite; }
+        }}
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.7; }}
+        }}
+        .pulse {{ animation: pulse 2s infinite; }}
     </style>
 </head>
 <body>
@@ -1743,7 +1752,7 @@ async def memeseal_landing():
         <h1>MEMESEAL TON ⚡🐸</h1>
         <p class="tagline">Seal your bags before the rug.</p>
         <p class="subtagline">One tap = on-chain proof you were early. No more "bro trust me" screenshots.</p>
-        <a href="https://t.me/MemeSealTON_bot" class="cta">START SEALING</a>
+        <a href="https://t.me/{MEMESEAL_USERNAME}" class="cta">START SEALING</a>
         <span class="badge">🔥 Costs less than a failed tx → 0.001 TON</span>
     </div>
 
@@ -1758,7 +1767,7 @@ async def memeseal_landing():
         </div>
         <div class="feature">
             <h3>🤖 Auto-Seal in Groups</h3>
-            <p>Add @MemeSealTON_bot to your raid channel. Every coin drop = auto-sealed with timestamp. Dev can't deny fair launch.</p>
+            <p>Add @{MEMESEAL_USERNAME} to your raid channel. Every coin drop = auto-sealed with timestamp. Dev can't deny fair launch.</p>
         </div>
         <div class="feature">
             <h3>💰 5% Referral Forever</h3>
@@ -1801,11 +1810,11 @@ async def memeseal_landing():
         <div class="code-block">
             <code>
 POST /api/v1/notarize<br>
-{<br>
+{{<br>
 &nbsp;&nbsp;"api_key": "your_telegram_id",<br>
 &nbsp;&nbsp;"contract_address": "EQ...",<br>
-&nbsp;&nbsp;"metadata": {"coin": "FROG420"}<br>
-}
+&nbsp;&nbsp;"metadata": {{"coin": "FROG420"}}<br>
+}}
             </code>
         </div>
         <a href="/docs" class="badge" style="margin-top: 30px; text-decoration: none;">📚 Full API Docs</a>
@@ -1814,7 +1823,7 @@ POST /api/v1/notarize<br>
     <footer>
         <p>Powered by TON | Built for degens | Will never rug you</p>
         <p style="margin-top: 15px;">
-            <a href="https://t.me/MemeSealTON_bot">Start Sealing</a> |
+            <a href="https://t.me/{MEMESEAL_USERNAME}">Start Sealing</a> |
             <a href="https://t.me/JPandaJamez">Support</a> |
             <a href="/verify">Verify a Seal</a>
         </p>
@@ -1827,7 +1836,7 @@ POST /api/v1/notarize<br>
 @app.get("/", response_class=HTMLResponse)
 async def landing_page():
     """Marketing landing page"""
-    return """
+    return f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1840,78 +1849,78 @@ async def landing_page():
     <meta property="og:image" content="https://notaryton.com/static/logo.png">
     <link rel="icon" type="image/png" href="/static/logo.png">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(180deg, #f0f4f8 0%, #d9e2ec 100%);
             color: #1a1a2e;
             min-height: 100vh;
-        }
-        .hero {
+        }}
+        .hero {{
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             padding: 60px 20px;
             text-align: center;
-        }
-        .logo-img {
+        }}
+        .logo-img {{
             width: 280px;
             height: auto;
             margin-bottom: 20px;
             filter: drop-shadow(0 10px 30px rgba(0,100,200,0.2));
-        }
-        h1 {
+        }}
+        h1 {{
             font-size: 2.8rem;
             margin-bottom: 15px;
             color: #0a4d8c;
-        }
-        .tagline {
+        }}
+        .tagline {{
             font-size: 1.4rem;
             color: #555;
             margin-bottom: 40px;
             max-width: 500px;
-        }
-        .features {
+        }}
+        .features {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 25px;
             max-width: 900px;
             margin: 0 auto 50px;
             padding: 0 20px;
-        }
-        .feature {
+        }}
+        .feature {{
             background: white;
             padding: 25px;
             border-radius: 16px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.08);
             text-align: left;
-        }
-        .feature h3 {
+        }}
+        .feature h3 {{
             font-size: 1.2rem;
             margin-bottom: 10px;
             color: #0a4d8c;
-        }
-        .feature p {
+        }}
+        .feature p {{
             color: #666;
             line-height: 1.5;
-        }
-        .cta-section {
+        }}
+        .cta-section {{
             background: linear-gradient(135deg, #0a4d8c 0%, #1a7fd4 100%);
             padding: 60px 20px;
             text-align: center;
-        }
-        .cta-section h2 {
+        }}
+        .cta-section h2 {{
             color: white;
             font-size: 2rem;
             margin-bottom: 20px;
-        }
-        .cta-section p {
+        }}
+        .cta-section p {{
             color: rgba(255,255,255,0.9);
             font-size: 1.2rem;
             margin-bottom: 30px;
-        }
-        .cta {
+        }}
+        .cta {{
             display: inline-block;
             background: white;
             color: #0a4d8c;
@@ -1921,79 +1930,79 @@ async def landing_page():
             font-size: 1.2rem;
             font-weight: 700;
             transition: transform 0.2s, box-shadow 0.2s;
-        }
-        .cta:hover {
+        }}
+        .cta:hover {{
             transform: translateY(-3px);
             box-shadow: 0 15px 40px rgba(0,0,0,0.2);
-        }
-        .pricing {
+        }}
+        .pricing {{
             padding: 60px 20px;
             text-align: center;
             background: white;
-        }
-        .pricing h2 {
+        }}
+        .pricing h2 {{
             font-size: 2rem;
             margin-bottom: 40px;
             color: #0a4d8c;
-        }
-        .price-cards {
+        }}
+        .price-cards {{
             display: flex;
             justify-content: center;
             gap: 30px;
             flex-wrap: wrap;
-        }
-        .price-card {
+        }}
+        .price-card {{
             background: #f8fafc;
             border: 2px solid #e2e8f0;
             border-radius: 20px;
             padding: 35px;
             width: 280px;
             transition: transform 0.2s, border-color 0.2s;
-        }
-        .price-card:hover {
+        }}
+        .price-card:hover {{
             transform: translateY(-5px);
             border-color: #0a4d8c;
-        }
-        .price-card h3 {
+        }}
+        .price-card h3 {{
             font-size: 1.3rem;
             margin-bottom: 15px;
             color: #333;
-        }
-        .price-card .price {
+        }}
+        .price-card .price {{
             font-size: 2.5rem;
             font-weight: 700;
             color: #0a4d8c;
             margin-bottom: 15px;
-        }
-        .price-card .price small {
+        }}
+        .price-card .price small {{
             font-size: 1rem;
             color: #888;
-        }
-        .price-card ul {
+        }}
+        .price-card ul {{
             list-style: none;
             text-align: left;
             margin-top: 20px;
-        }
-        .price-card li {
+        }}
+        .price-card li {{
             padding: 8px 0;
             color: #555;
-        }
-        .price-card li:before {
+        }}
+        .price-card li:before {{
             content: "✓ ";
             color: #22c55e;
             font-weight: bold;
-        }
-        footer {
+        }}
+        footer {{
             background: #1a1a2e;
             color: #888;
             padding: 40px 20px;
             text-align: center;
-        }
-        footer a {
+        }}
+        footer a {{
             color: #00d4ff;
             text-decoration: none;
-        }
-        .api-badge {
+        }}
+        .api-badge {{
             display: inline-block;
             background: #e0f2fe;
             color: #0369a1;
@@ -2001,7 +2010,7 @@ async def landing_page():
             border-radius: 20px;
             font-size: 0.9rem;
             margin-top: 20px;
-        }
+        }}
     </style>
 </head>
 <body>
@@ -2009,7 +2018,7 @@ async def landing_page():
         <img src="/static/logo.png" alt="NotaryTON Logo" class="logo-img">
         <h1>NotaryTON</h1>
         <p class="tagline">Seal any file on TON blockchain. Instant. Immutable. Forever.</p>
-        <a href="https://t.me/NotaryTON_bot" class="cta">Start Notarizing</a>
+        <a href="https://t.me/{BOT_USERNAME}" class="cta">Start Notarizing</a>
         <span class="api-badge">Public API Available</span>
     </div>
 
@@ -2061,7 +2070,7 @@ async def landing_page():
     <div class="cta-section">
         <h2>Ready to Seal Your First File?</h2>
         <p>Join thousands of projects using NotaryTON for blockchain-verified proof.</p>
-        <a href="https://t.me/NotaryTON_bot" class="cta">Open in Telegram</a>
+        <a href="https://t.me/{BOT_USERNAME}" class="cta">Open in Telegram</a>
     </div>
 
     <footer>
@@ -2262,8 +2271,26 @@ async def stats():
 @app.on_event("startup")
 async def on_startup():
     """Set webhooks for both bots on startup"""
+    global BOT_USERNAME, MEMESEAL_USERNAME
+
     # Initialize database
     await init_db()
+
+    # Get bot info
+    try:
+        bot_info = await bot.get_me()
+        BOT_USERNAME = bot_info.username
+        print(f"✅ NotaryTON username: @{BOT_USERNAME}")
+    except Exception as e:
+        print(f"⚠️ Could not fetch NotaryTON info: {e}")
+
+    if memeseal_bot:
+        try:
+            ms_info = await memeseal_bot.get_me()
+            MEMESEAL_USERNAME = ms_info.username
+            print(f"✅ MemeSeal username: @{MEMESEAL_USERNAME}")
+        except Exception as e:
+            print(f"⚠️ Could not fetch MemeSeal info: {e}")
 
     # Set NotaryTON webhook
     webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
