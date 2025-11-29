@@ -5,6 +5,7 @@ import asyncio
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, FileResponse
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import Update, LabeledPrice, PreCheckoutQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
@@ -57,6 +58,102 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 DB_PATH = "notaryton.db"
 
 # ========================
+# MULTI-LANGUAGE SUPPORT (i18n)
+# ========================
+
+TRANSLATIONS = {
+    "en": {
+        "welcome": "🔐 **NotaryTON** - Blockchain Notarization\n\nSeal contracts, files, and screenshots on TON forever.\n\n**Commands:**\n/notarize - Seal a contract\n/status - Check your subscription\n/subscribe - Get unlimited seals\n/referral - Earn 5% commission\n/withdraw - Withdraw referral earnings\n/lang - Change language",
+        "no_sub": "⚠️ **Payment Required**\n\n1 Star or 0.001 TON to seal this.",
+        "sealed": "✅ **SEALED ON TON!**\n\nHash: `{hash}`\n\n🔗 Verify: {url}\n\nProof secured forever! 🔒",
+        "withdraw_success": "✅ **Withdrawal Sent!**\n\n{amount} TON sent to your wallet.\nTX will appear in ~30 seconds.",
+        "withdraw_min": "⚠️ Minimum withdrawal: 0.05 TON\n\nYour balance: {balance} TON",
+        "withdraw_no_wallet": "⚠️ Please send your TON wallet address first.\n\nExample: `EQB...` or `UQA...`",
+        "lang_changed": "✅ Language changed to English",
+        "referral_stats": "🎁 **Referral Program**\n\n**Your Link:**\n`{url}`\n\n**Commission:** 5%\n**Referrals:** {count}\n**Earnings:** {earnings} TON\n**Withdrawn:** {withdrawn} TON\n**Available:** {available} TON\n\n💡 Use /withdraw to cash out!",
+        "status_active": "✅ **Subscription Active**\n\nExpires: {expiry}\n\nUnlimited seals enabled!",
+        "status_inactive": "❌ **No Active Subscription**\n\nCredits: {credits} TON\n\nUse /subscribe for unlimited!",
+        "photo_prompt": "📸 **Nice screenshot!**\n\n1 Star to seal it on TON forever.",
+        "file_prompt": "📄 **Got your file!**\n\n1 Star to seal it on TON forever.",
+    },
+    "ru": {
+        "welcome": "🔐 **NotaryTON** - Блокчейн Нотаризация\n\nПечать контрактов, файлов и скриншотов на TON навсегда.\n\n**Команды:**\n/notarize - Запечатать контракт\n/status - Проверить подписку\n/subscribe - Безлимит\n/referral - Заработай 5%\n/withdraw - Вывести заработок\n/lang - Сменить язык",
+        "no_sub": "⚠️ **Требуется оплата**\n\n1 Звезда или 0.001 TON для печати.",
+        "sealed": "✅ **ЗАПЕЧАТАНО НА TON!**\n\nХеш: `{hash}`\n\n🔗 Проверить: {url}\n\nДоказательство сохранено навсегда! 🔒",
+        "withdraw_success": "✅ **Вывод отправлен!**\n\n{amount} TON отправлено на ваш кошелек.\nTX появится через ~30 секунд.",
+        "withdraw_min": "⚠️ Минимальный вывод: 0.05 TON\n\nВаш баланс: {balance} TON",
+        "withdraw_no_wallet": "⚠️ Сначала отправьте адрес вашего TON кошелька.\n\nПример: `EQB...` или `UQA...`",
+        "lang_changed": "✅ Язык изменен на Русский",
+        "referral_stats": "🎁 **Реферальная Программа**\n\n**Ваша ссылка:**\n`{url}`\n\n**Комиссия:** 5%\n**Рефералы:** {count}\n**Заработано:** {earnings} TON\n**Выведено:** {withdrawn} TON\n**Доступно:** {available} TON\n\n💡 Используйте /withdraw для вывода!",
+        "status_active": "✅ **Подписка Активна**\n\nИстекает: {expiry}\n\nБезлимитные печати включены!",
+        "status_inactive": "❌ **Нет Активной Подписки**\n\nКредиты: {credits} TON\n\nИспользуйте /subscribe для безлимита!",
+        "photo_prompt": "📸 **Отличный скриншот!**\n\n1 Звезда чтобы запечатать на TON навсегда.",
+        "file_prompt": "📄 **Файл получен!**\n\n1 Звезда чтобы запечатать на TON навсегда.",
+    },
+    "zh": {
+        "welcome": "🔐 **NotaryTON** - 区块链公证\n\n在TON上永久封存合约、文件和截图。\n\n**命令:**\n/notarize - 封存合约\n/status - 查看订阅\n/subscribe - 无限封存\n/referral - 赚取5%佣金\n/withdraw - 提取收益\n/lang - 更改语言",
+        "no_sub": "⚠️ **需要付款**\n\n1星或0.001 TON来封存。",
+        "sealed": "✅ **已封存到TON!**\n\n哈希: `{hash}`\n\n🔗 验证: {url}\n\n证明已永久保存! 🔒",
+        "withdraw_success": "✅ **提款已发送!**\n\n{amount} TON已发送到您的钱包。\n交易将在~30秒后显示。",
+        "withdraw_min": "⚠️ 最低提款: 0.05 TON\n\n您的余额: {balance} TON",
+        "withdraw_no_wallet": "⚠️ 请先发送您的TON钱包地址。\n\n例如: `EQB...` 或 `UQA...`",
+        "lang_changed": "✅ 语言已更改为中文",
+        "referral_stats": "🎁 **推荐计划**\n\n**您的链接:**\n`{url}`\n\n**佣金:** 5%\n**推荐人数:** {count}\n**收益:** {earnings} TON\n**已提取:** {withdrawn} TON\n**可用:** {available} TON\n\n💡 使用 /withdraw 提现!",
+        "status_active": "✅ **订阅有效**\n\n到期: {expiry}\n\n无限封存已启用!",
+        "status_inactive": "❌ **无有效订阅**\n\n余额: {credits} TON\n\n使用 /subscribe 获取无限!",
+        "photo_prompt": "📸 **不错的截图!**\n\n1星即可永久封存到TON。",
+        "file_prompt": "📄 **文件已收到!**\n\n1星即可永久封存到TON。",
+    }
+}
+
+# User language cache (user_id -> lang_code)
+user_languages = {}
+
+def get_text(user_id: int, key: str, **kwargs) -> str:
+    """Get translated text for user"""
+    lang = user_languages.get(user_id, "en")
+    text = TRANSLATIONS.get(lang, TRANSLATIONS["en"]).get(key, TRANSLATIONS["en"].get(key, key))
+    if kwargs:
+        text = text.format(**kwargs)
+    return text
+
+async def detect_user_language(user: types.User) -> str:
+    """Detect language from Telegram user settings"""
+    lang_code = getattr(user, 'language_code', 'en') or 'en'
+    # Map Telegram language codes to our supported languages
+    if lang_code.startswith('ru'):
+        return 'ru'
+    elif lang_code.startswith('zh'):
+        return 'zh'
+    return 'en'
+
+async def get_user_language(user_id: int) -> str:
+    """Get user's language preference from DB or cache"""
+    if user_id in user_languages:
+        return user_languages[user_id]
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT language FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0]:
+                user_languages[user_id] = row[0]
+                return row[0]
+    return 'en'
+
+async def set_user_language(user_id: int, lang: str):
+    """Set user's language preference"""
+    user_languages[user_id] = lang
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO users (user_id, language) VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET language = ?
+        """, (user_id, lang, lang))
+        await db.commit()
+
+# Minimum withdrawal amount
+MIN_WITHDRAWAL_TON = 0.05
+
+# ========================
 # DATABASE FUNCTIONS
 # ========================
 
@@ -71,9 +168,22 @@ async def init_db():
                 referral_code TEXT UNIQUE,
                 referred_by INTEGER,
                 referral_earnings REAL DEFAULT 0,
+                total_withdrawn REAL DEFAULT 0,
+                withdrawal_wallet TEXT,
+                language TEXT DEFAULT 'en',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Migration: Add new columns to existing tables
+        for col, default in [
+            ("language", "'en'"),
+            ("withdrawal_wallet", "NULL"),
+            ("total_withdrawn", "0")
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE users ADD COLUMN {col} DEFAULT {default}")
+            except Exception:
+                pass  # Column already exists
         await db.execute("""
             CREATE TABLE IF NOT EXISTS notarizations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -234,6 +344,84 @@ async def send_ton_transaction(comment: str, amount_ton: float = 0.001):
         if client:
             await client.close_all()
 
+async def send_payout_transaction(destination: str, amount_ton: float, memo: str = "NotaryTON Payout"):
+    """Send TON payout to user wallet"""
+    client = None
+    try:
+        client = LiteBalancer.from_mainnet_config(trust_level=1)
+        await client.start_up()
+
+        mnemonics = TON_WALLET_SECRET.split()
+        wallet = await WalletV4R2.from_mnemonic(provider=client, mnemonics=mnemonics)
+
+        # Send to user's wallet
+        result = await wallet.transfer(
+            destination=destination,
+            amount=int(amount_ton * 1e9),  # Convert to nanotons
+            body=memo
+        )
+
+        print(f"✅ Payout sent: {amount_ton} TON to {destination}")
+        return result
+    except Exception as e:
+        print(f"❌ Error sending payout: {e}")
+        raise
+    finally:
+        if client:
+            await client.close_all()
+
+async def resolve_ton_dns(domain: str) -> str:
+    """Resolve .ton domain to TON address"""
+    client = None
+    try:
+        # Clean up domain
+        domain = domain.lower().strip()
+        if not domain.endswith('.ton'):
+            return None
+
+        client = LiteBalancer.from_mainnet_config(trust_level=1)
+        await client.start_up()
+
+        # TON DNS root contract address
+        DNS_ROOT = "EQC3dNlesgVD8YbAazcauIrXBPfiVhMMr5YYk2in0Mtsz0Bz"
+
+        # Resolve domain
+        domain_parts = domain[:-4].split('.')  # Remove .ton and split
+        domain_parts.reverse()  # TON DNS resolves from right to left
+
+        current_address = DNS_ROOT
+        for part in domain_parts:
+            # Hash the domain part
+            part_hash = hashlib.sha256(part.encode()).digest()
+
+            # Call get_next_resolver on current address
+            try:
+                result = await client.run_get_method(
+                    address=current_address,
+                    method="dnsresolve",
+                    stack=[{"type": "slice", "value": part_hash}, {"type": "int", "value": 256}]
+                )
+                if result and len(result) > 1:
+                    # Extract wallet address from result
+                    current_address = result[1]
+            except Exception:
+                return None
+
+        # Validate it's a proper address
+        try:
+            Address(current_address)
+            print(f"✅ Resolved {domain} -> {current_address}")
+            return current_address
+        except Exception:
+            return None
+
+    except Exception as e:
+        print(f"⚠️ DNS resolution failed for {domain}: {e}")
+        return None
+    finally:
+        if client:
+            await client.close_all()
+
 async def poll_wallet_for_payments():
     """Background task to poll wallet for incoming payments with retry logic"""
     last_processed_lt = 0
@@ -290,7 +478,7 @@ async def poll_wallet_for_payments():
                     if hasattr(in_msg, 'body') and in_msg.body:
                         try:
                             memo = in_msg.body.decode('utf-8', errors='ignore')
-                        except:
+                        except Exception:
                             memo = str(in_msg.body)
 
                     print(f"📥 Incoming payment: {amount_ton} TON, memo: {memo}")
@@ -301,10 +489,26 @@ async def poll_wallet_for_payments():
                         match = re.search(r'\d+', memo)
                         if match:
                             user_id = int(match.group())
-                    except:
+                    except Exception:
                         pass
 
                     if user_id:
+                        # Credit referrer with 5% commission
+                        async with aiosqlite.connect(DB_PATH) as db:
+                            async with db.execute(
+                                "SELECT referred_by FROM users WHERE user_id = ?", (user_id,)
+                            ) as cursor:
+                                row = await cursor.fetchone()
+                                if row and row[0]:
+                                    referrer_id = row[0]
+                                    commission = amount_ton * 0.05
+                                    await db.execute("""
+                                        UPDATE users SET referral_earnings = COALESCE(referral_earnings, 0) + ?
+                                        WHERE user_id = ?
+                                    """, (commission, referrer_id))
+                                    await db.commit()
+                                    print(f"💰 Credited {commission:.4f} TON to referrer {referrer_id}")
+
                         # Check if it's a subscription payment (0.1 TON)
                         if amount_ton >= 0.095:  # Allow small variance
                             await add_subscription(user_id, months=1)
@@ -322,7 +526,7 @@ async def poll_wallet_for_payments():
                                             parse_mode="Markdown"
                                         )
                                         break  # Only send once
-                                    except:
+                                    except Exception:
                                         pass
 
                         # Check if it's a single notarization payment (0.001 TON)
@@ -353,7 +557,7 @@ async def poll_wallet_for_payments():
                                             parse_mode="Markdown"
                                         )
                                         break  # Only send once
-                                    except:
+                                    except Exception:
                                         pass
 
                 # Update max LT seen
@@ -388,7 +592,7 @@ async def poll_wallet_for_payments():
             if client:
                 try:
                     await client.close_all()
-                except:
+                except Exception:
                     pass
 
         # Exponential backoff on errors (30s -> 60s -> 120s -> 240s -> 300s max)
@@ -433,9 +637,9 @@ async def cmd_start(message: types.Message):
                         f"🎉 New referral! User {user_id} joined via your link.\n"
                         f"You'll earn 5% of their payments!"
                     )
-                except:
+                except Exception:
                     pass
-            except:
+            except Exception:
                 pass
         else:
             # Just create user entry
@@ -773,7 +977,19 @@ async def cmd_referral(message: types.Message):
             ref_count, ref_revenue = await cursor.fetchone()
     
     referral_url = f"https://t.me/NotaryTON_bot?start={referral_code}"
-    
+
+    # Get withdrawal stats
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT COALESCE(referral_earnings, 0), COALESCE(total_withdrawn, 0)
+            FROM users WHERE user_id = ?
+        """, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            total_earnings = row[0] if row else 0
+            total_withdrawn = row[1] if row else 0
+
+    available = total_earnings - total_withdrawn
+
     await message.answer(
         f"🎁 **Referral Program**\n\n"
         f"**Your Referral Link:**\n"
@@ -781,9 +997,143 @@ async def cmd_referral(message: types.Message):
         f"**Commission:** 5% of referrals' payments\n"
         f"**Your Stats:**\n"
         f"• Referrals: {ref_count}\n"
-        f"• Total Revenue: {ref_revenue:.4f} TON\n"
-        f"• Your Earnings: {ref_revenue * 0.05:.4f} TON\n\n"
-        f"💡 Share this link with other TON projects!",
+        f"• Total Earnings: {total_earnings:.4f} TON\n"
+        f"• Withdrawn: {total_withdrawn:.4f} TON\n"
+        f"• Available: {available:.4f} TON\n\n"
+        f"💡 Use /withdraw to cash out!",
+        parse_mode="Markdown"
+    )
+
+@dp.message(Command("withdraw"))
+async def cmd_withdraw(message: types.Message):
+    """Withdraw referral earnings"""
+    user_id = message.from_user.id
+    args = message.text.split()[1:] if len(message.text.split()) > 1 else []
+
+    # Get user's available balance
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT COALESCE(referral_earnings, 0), COALESCE(total_withdrawn, 0), withdrawal_wallet
+            FROM users WHERE user_id = ?
+        """, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                await message.answer("⚠️ No earnings yet. Share your /referral link to start earning!")
+                return
+
+            total_earnings, total_withdrawn, saved_wallet = row
+            available = total_earnings - total_withdrawn
+
+    # Check if wallet address was provided
+    wallet_address = None
+    if args:
+        potential_wallet = args[0]
+        # Validate TON address format
+        if potential_wallet.startswith(('EQ', 'UQ', 'kQ', '0Q')):
+            try:
+                Address(potential_wallet)
+                wallet_address = potential_wallet
+                # Save wallet for future
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute(
+                        "UPDATE users SET withdrawal_wallet = ? WHERE user_id = ?",
+                        (wallet_address, user_id)
+                    )
+                    await db.commit()
+            except Exception:
+                await message.answer("⚠️ Invalid wallet address format.")
+                return
+    else:
+        wallet_address = saved_wallet
+
+    if not wallet_address:
+        await message.answer(
+            "💳 **Withdraw Referral Earnings**\n\n"
+            f"Available: **{available:.4f} TON**\n\n"
+            "To withdraw, send:\n"
+            "`/withdraw EQYourWalletAddress...`\n\n"
+            "Example:\n"
+            "`/withdraw EQB4s8q3ysQxY2gTT14xWUJzBu2g...`",
+            parse_mode="Markdown"
+        )
+        return
+
+    # Check minimum
+    if available < MIN_WITHDRAWAL_TON:
+        await message.answer(
+            f"⚠️ **Minimum Withdrawal: {MIN_WITHDRAWAL_TON} TON**\n\n"
+            f"Your balance: {available:.4f} TON\n\n"
+            f"Keep sharing your /referral link to earn more!",
+            parse_mode="Markdown"
+        )
+        return
+
+    # Process withdrawal
+    try:
+        await send_payout_transaction(
+            destination=wallet_address,
+            amount_ton=available,
+            memo=f"NotaryTON Referral Payout"
+        )
+
+        # Update DB
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE users SET total_withdrawn = total_withdrawn + ? WHERE user_id = ?",
+                (available, user_id)
+            )
+            await db.commit()
+
+        await message.answer(
+            f"✅ **Withdrawal Sent!**\n\n"
+            f"**Amount:** {available:.4f} TON\n"
+            f"**To:** `{wallet_address[:20]}...`\n\n"
+            f"TX will appear in ~30 seconds.\n"
+            f"Check: tonscan.org/address/{wallet_address}",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await message.answer(
+            f"❌ **Withdrawal Failed**\n\n"
+            f"Error: {str(e)}\n\n"
+            f"Please try again later or contact support.",
+            parse_mode="Markdown"
+        )
+
+@dp.message(Command("lang"))
+async def cmd_lang(message: types.Message):
+    """Change language"""
+    user_id = message.from_user.id
+
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [
+            types.InlineKeyboardButton(text="🇺🇸 English", callback_data="lang_en"),
+            types.InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru"),
+        ],
+        [
+            types.InlineKeyboardButton(text="🇨🇳 中文", callback_data="lang_zh"),
+        ]
+    ])
+
+    await message.answer(
+        "🌍 **Choose Your Language**\n\n"
+        "Select your preferred language:",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
+@dp.callback_query(F.data.startswith("lang_"))
+async def process_lang_change(callback: types.CallbackQuery):
+    """Handle language change callback"""
+    user_id = callback.from_user.id
+    lang = callback.data.replace("lang_", "")
+
+    await set_user_language(user_id, lang)
+    await callback.answer()
+
+    lang_names = {"en": "English", "ru": "Русский", "zh": "中文"}
+    await callback.message.edit_text(
+        f"✅ Language changed to **{lang_names.get(lang, 'English')}**",
         parse_mode="Markdown"
     )
 
@@ -1077,7 +1427,7 @@ async def handle_document(message: types.Message):
     # Clean up
     try:
         os.remove(file_path)
-    except:
+    except Exception:
         pass
 
 
@@ -1126,7 +1476,7 @@ async def handle_photo(message: types.Message):
 
     try:
         os.remove(file_path)
-    except:
+    except Exception:
         pass
 
 
@@ -1379,7 +1729,7 @@ if memeseal_dp:
 
         try:
             os.remove(file_path)
-        except:
+        except Exception:
             pass
 
     @memeseal_dp.message(F.photo)
@@ -1442,7 +1792,7 @@ if memeseal_dp:
 
         try:
             os.remove(file_path)
-        except:
+        except Exception:
             pass
 
 # ========================
@@ -1475,15 +1825,12 @@ async def health_check():
 @app.get("/favicon.ico")
 async def favicon():
     """Serve favicon"""
-    from fastapi.responses import FileResponse
     favicon_path = "static/favicon.ico"
     if os.path.exists(favicon_path):
         return FileResponse(favicon_path)
     # Fallback to logo.png
     return FileResponse("static/logo.png", media_type="image/png")
 
-
-from fastapi.responses import HTMLResponse
 
 @app.get("/verify", response_class=HTMLResponse)
 async def verify_page():
@@ -2518,7 +2865,7 @@ async def api_batch_notarize(request: Request):
 
 @app.get("/stats")
 async def stats():
-    """Get bot statistics"""
+    """Get bot statistics (JSON API)"""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT COUNT(*) FROM users") as cursor:
             total_users = (await cursor.fetchone())[0]
@@ -2529,6 +2876,217 @@ async def stats():
         "total_users": total_users,
         "total_notarizations": total_notarizations
     }
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    """Visual dashboard for NotaryTON stats"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Total stats
+        async with db.execute("SELECT COUNT(*) FROM users") as cursor:
+            total_users = (await cursor.fetchone())[0]
+        async with db.execute("SELECT COUNT(*) FROM notarizations") as cursor:
+            total_notarizations = (await cursor.fetchone())[0]
+
+        # 24h stats
+        async with db.execute("""
+            SELECT COUNT(*) FROM notarizations
+            WHERE timestamp > datetime('now', '-1 day')
+        """) as cursor:
+            notarizations_24h = (await cursor.fetchone())[0]
+
+        async with db.execute("""
+            SELECT COUNT(*) FROM users
+            WHERE created_at > datetime('now', '-1 day')
+        """) as cursor:
+            users_24h = (await cursor.fetchone())[0]
+
+        # Revenue stats
+        async with db.execute("SELECT COALESCE(SUM(total_paid), 0) FROM users") as cursor:
+            total_revenue = (await cursor.fetchone())[0]
+
+        # Referral stats
+        async with db.execute("SELECT COUNT(*) FROM users WHERE referred_by IS NOT NULL") as cursor:
+            total_referrals = (await cursor.fetchone())[0]
+
+        async with db.execute("SELECT COALESCE(SUM(referral_earnings), 0) FROM users") as cursor:
+            total_referral_earnings = (await cursor.fetchone())[0]
+
+        # Top referrers
+        async with db.execute("""
+            SELECT u.user_id, COUNT(r.user_id) as ref_count, COALESCE(u.referral_earnings, 0) as earnings
+            FROM users u
+            LEFT JOIN users r ON r.referred_by = u.user_id
+            WHERE u.referral_code IS NOT NULL
+            GROUP BY u.user_id
+            ORDER BY ref_count DESC
+            LIMIT 5
+        """) as cursor:
+            top_referrers = await cursor.fetchall()
+
+        # Recent notarizations
+        async with db.execute("""
+            SELECT contract_hash, timestamp FROM notarizations
+            ORDER BY timestamp DESC LIMIT 10
+        """) as cursor:
+            recent_seals = await cursor.fetchall()
+
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NotaryTON Dashboard</title>
+    <script src="https://cloud.umami.is/script.js" data-website-id="b0430a5c-a5f9-4b36-9498-5cd9eb662403" defer></script>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }}
+        .container {{ max-width: 1200px; margin: 0 auto; }}
+        h1 {{
+            text-align: center;
+            font-size: 2.5rem;
+            margin-bottom: 30px;
+            background: linear-gradient(90deg, #00d4ff, #0099ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }}
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }}
+        .stat-card {{
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }}
+        .stat-card:hover {{
+            transform: translateY(-5px);
+            box-shadow: 0 10px 40px rgba(0,212,255,0.2);
+        }}
+        .stat-value {{
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(90deg, #00d4ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }}
+        .stat-label {{
+            color: #888;
+            font-size: 0.9rem;
+            margin-top: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        .section {{
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }}
+        .section h2 {{
+            font-size: 1.3rem;
+            margin-bottom: 16px;
+            color: #00d4ff;
+        }}
+        .table {{
+            width: 100%;
+            border-collapse: collapse;
+        }}
+        .table th, .table td {{
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }}
+        .table th {{ color: #888; font-weight: 500; }}
+        .hash {{ font-family: monospace; color: #00ff88; font-size: 0.85rem; }}
+        .badge {{
+            background: linear-gradient(90deg, #00d4ff, #0099ff);
+            color: #000;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }}
+        .footer {{
+            text-align: center;
+            color: #666;
+            margin-top: 40px;
+            padding: 20px;
+        }}
+        .footer a {{ color: #00d4ff; text-decoration: none; }}
+        @media (max-width: 600px) {{
+            .stat-value {{ font-size: 1.8rem; }}
+            h1 {{ font-size: 1.8rem; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 NotaryTON Dashboard</h1>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">{total_users:,}</div>
+                <div class="stat-label">Total Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{total_notarizations:,}</div>
+                <div class="stat-label">Total Seals</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{notarizations_24h:,}</div>
+                <div class="stat-label">Seals (24h)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{users_24h:,}</div>
+                <div class="stat-label">New Users (24h)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{total_revenue:.2f}</div>
+                <div class="stat-label">Revenue (TON)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{total_referrals:,}</div>
+                <div class="stat-label">Referrals</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🏆 Top Referrers</h2>
+            <table class="table">
+                <tr><th>User ID</th><th>Referrals</th><th>Earnings</th></tr>
+                {"".join(f'<tr><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]:.4f} TON</td></tr>' for r in top_referrers) if top_referrers else '<tr><td colspan="3" style="color:#666">No referrers yet</td></tr>'}
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>⚡ Recent Seals</h2>
+            <table class="table">
+                <tr><th>Hash</th><th>Time</th></tr>
+                {"".join(f'<tr><td class="hash">{s[0][:16]}...</td><td>{s[1]}</td></tr>' for s in recent_seals) if recent_seals else '<tr><td colspan="2" style="color:#666">No seals yet</td></tr>'}
+            </table>
+        </div>
+
+        <div class="footer">
+            <p>Powered by <a href="https://t.me/NotaryTON_bot">@NotaryTON_bot</a> | <a href="/">Home</a> | <a href="/stats">API</a></p>
+        </div>
+    </div>
+</body>
+</html>
+"""
 
 @app.on_event("startup")
 async def on_startup():

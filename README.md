@@ -21,12 +21,15 @@
 - `/notarize` - Manually notarize a contract or file
 - `/api` - Get API credentials for third-party integration
 - `/referral` - Get your referral link (earn 5% commission)
+- `/withdraw` - Withdraw referral earnings to your TON wallet
+- `/lang` - Change language (English, Русский, 中文)
 
 ### API Endpoints
 
 **Internal:**
 - `GET /` - Health check
-- `GET /stats` - Bot statistics (users, notarizations)
+- `GET /stats` - Bot statistics (JSON API)
+- `GET /dashboard` - Visual dashboard with charts
 - `POST /webhook/{token}` - Telegram webhook handler
 
 **Public API (requires subscription):**
@@ -260,7 +263,7 @@ Track via `/stats` endpoint:
 
 ## 🤝 Contributing
 
-This is a solo project by [@jesselawson](https://github.com/jesselawson). Open to collaborators!
+This is a solo project by [Jesse James](https://github.com/jdevop33). Open to collaborators!
 
 ---
 
@@ -272,9 +275,9 @@ MIT License - See LICENSE file
 
 ## 🆘 Support
 
-- **Issues**: [GitHub Issues](https://github.com/jesselawson/notaryton-bot/issues)
+- **Issues**: [GitHub Issues](https://github.com/jdevop33/notaryton-bot/issues)
 - **Telegram**: @NotaryTON_bot
-- **Email**: [your-email]
+- **Email**: panda@juche.org
 
 ---
 
@@ -283,12 +286,14 @@ MIT License - See LICENSE file
 - [x] Core bot functionality
 - [x] Subscription system
 - [x] Auto-notarization for groups
-- [x] Admin outreach automation
-- [ ] Full payment verification (TON wallet polling)
-- [ ] Referral tracking & payouts
-- [ ] Web dashboard for stats
-- [ ] Multi-language support
-- [ ] TON DNS integration
+- [x] Admin outreach automation (Lead Generator)
+- [x] Full payment verification (TON wallet polling)
+- [x] Referral tracking
+- [x] Web analytics (Umami)
+- [x] Automated Referral Payouts (/withdraw command)
+- [x] Web dashboard for stats (/dashboard)
+- [x] Multi-language support (EN/RU/ZH)
+- [x] TON DNS integration (.ton domain resolution)
 - [ ] Mobile app (PWA)
 
 ---
