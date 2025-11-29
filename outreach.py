@@ -94,15 +94,19 @@ async def send_dm_to_admin(admin_id, admin_name, group):
         return False
 
 async def run_outreach():
-    """Main outreach loop"""
-    print("🚀 Starting NotaryTON Admin Outreach Campaign\n")
+    """Main outreach loop - Generates a lead list"""
+    print("🚀 Starting NotaryTON Admin Lead Generation\n")
 
-    total_sent = 0
-    total_failed = 0
-    total_skipped = 0
+    leads = []
+    
+    # Create leads file if not exists
+    if not os.path.exists("leads.csv"):
+        with open("leads.csv", "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Group", "Admin Name", "Username", "DM Link", "Status"])
 
     for group in TARGET_GROUPS:
-        print(f"\n📢 Processing group: {group}")
+        print(f"\n📢 Scanning group: {group}")
 
         admins = await get_group_admins(group)
 
@@ -113,26 +117,23 @@ async def run_outreach():
         print(f"   Found {len(admins)} admins")
 
         for admin_id, admin_name, admin_username in admins:
-            result = await send_dm_to_admin(admin_id, admin_name, group)
-
-            if result:
-                total_sent += 1
-            elif result is False:
-                total_failed += 1
+            if admin_username:
+                dm_link = f"https://t.me/{admin_username}"
+                print(f"   👤 Found: @{admin_username} ({admin_name})")
+                
+                # Append to CSV
+                with open("leads.csv", "a", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow([group, admin_name, f"@{admin_username}", dm_link, "Pending"])
             else:
-                total_skipped += 1
+                print(f"   👤 Found: {admin_name} (No username - skipping)")
 
-            # Rate limit: 1 second between DMs
-            await asyncio.sleep(1)
+        # Pause between groups
+        await asyncio.sleep(2)
 
-        # Longer pause between groups
-        await asyncio.sleep(3)
-
-    print(f"\n\n📊 Campaign Summary:")
-    print(f"   ✅ Sent: {total_sent}")
-    print(f"   ❌ Failed: {total_failed}")
-    print(f"   ⏭️  Skipped: {total_skipped}")
-    print(f"\n📋 Full log saved to: {SENT_LOG}")
+    print(f"\n\n📊 Lead Generation Complete!")
+    print(f"   📋 Leads saved to: leads.csv")
+    print(f"   👉 Open leads.csv and DM these admins manually!")
 
 async def main():
     """Entry point"""

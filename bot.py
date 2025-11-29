@@ -225,119 +225,142 @@ async def send_ton_transaction(comment: str, amount_ton: float = 0.001):
             await client.close_all()
 
 async def poll_wallet_for_payments():
-    """Background task to poll wallet for incoming payments"""
+    """Background task to poll wallet for incoming payments with retry logic"""
     last_processed_lt = None  # Track last processed logical time
+    consecutive_errors = 0
+    max_backoff = 300  # Max 5 minutes between retries
 
     while True:
         client = None
         try:
             client = LiteBalancer.from_mainnet_config(trust_level=1)
-            await client.start_up()
+            await asyncio.wait_for(client.start_up(), timeout=30)  # 30s timeout
 
             # Get wallet address
             wallet_address = Address(SERVICE_TON_WALLET)
 
-            # Get recent transactions
-            try:
-                transactions = await client.get_transactions(
-                    address=wallet_address.to_str(),
-                    count=10
-                )
+            # Get recent transactions with timeout
+            transactions = await asyncio.wait_for(
+                client.get_transactions(address=wallet_address.to_str(), count=10),
+                timeout=30
+            )
 
-                for tx in transactions:
-                    # Skip if we've already processed this transaction
-                    if last_processed_lt and tx.lt <= last_processed_lt:
-                        continue
+            for tx in transactions:
+                # Skip if we've already processed this transaction
+                if last_processed_lt and tx.lt <= last_processed_lt:
+                    continue
 
-                    # Check if this is an incoming transaction
-                    if hasattr(tx, 'in_msg') and tx.in_msg:
-                        in_msg = tx.in_msg
+                # Check if this is an incoming transaction
+                if hasattr(tx, 'in_msg') and tx.in_msg:
+                    in_msg = tx.in_msg
 
-                        # Extract amount (in nanotons)
-                        amount_nano = getattr(in_msg, 'value', 0) if hasattr(in_msg, 'value') else 0
-                        amount_ton = amount_nano / 1e9
+                    # Extract amount (in nanotons)
+                    amount_nano = getattr(in_msg, 'value', 0) if hasattr(in_msg, 'value') else 0
+                    amount_ton = amount_nano / 1e9
 
-                        # Extract memo/comment
-                        memo = ""
-                        if hasattr(in_msg, 'body') and in_msg.body:
-                            try:
-                                memo = in_msg.body.decode('utf-8', errors='ignore')
-                            except:
-                                memo = str(in_msg.body)
-
-                        print(f"📥 Incoming payment: {amount_ton} TON, memo: {memo}")
-
-                        # Try to extract user_id from memo
-                        user_id = None
+                    # Extract memo/comment
+                    memo = ""
+                    if hasattr(in_msg, 'body') and in_msg.body:
                         try:
-                            # Look for numeric user ID in memo
-                            import re
-                            match = re.search(r'\d+', memo)
-                            if match:
-                                user_id = int(match.group())
+                            memo = in_msg.body.decode('utf-8', errors='ignore')
                         except:
-                            pass
+                            memo = str(in_msg.body)
 
-                        if user_id:
-                            # Check if it's a subscription payment (0.1 TON)
-                            if amount_ton >= 0.095:  # Allow small variance
-                                await add_subscription(user_id, months=1)
-                                print(f"✅ Activated subscription for user {user_id}")
+                    print(f"📥 Incoming payment: {amount_ton} TON, memo: {memo}")
 
-                                # Notify user
-                                try:
-                                    await bot.send_message(
-                                        user_id,
-                                        "✅ **Subscription Activated!**\n\n"
-                                        "You now have unlimited notarizations for 30 days!\n\n"
-                                        "Use /notarize to seal your first contract. 🔒",
-                                        parse_mode="Markdown"
-                                    )
-                                except Exception as notify_error:
-                                    print(f"Could not notify user {user_id}: {notify_error}")
+                    # Try to extract user_id from memo
+                    user_id = None
+                    try:
+                        match = re.search(r'\d+', memo)
+                        if match:
+                            user_id = int(match.group())
+                    except:
+                        pass
 
-                            # Check if it's a single notarization payment (0.001 TON)
-                            elif amount_ton >= 0.0009:  # Allow small variance
-                                # Add to database as paid credit
-                                async with aiosqlite.connect(DB_PATH) as db:
-                                    await db.execute("""
-                                        INSERT OR IGNORE INTO users (user_id) VALUES (?)
-                                    """, (user_id,))
-                                    await db.execute("""
-                                        UPDATE users
-                                        SET total_paid = total_paid + ?
-                                        WHERE user_id = ?
-                                    """, (amount_ton, user_id))
-                                    await db.commit()
+                    if user_id:
+                        # Check if it's a subscription payment (0.1 TON)
+                        if amount_ton >= 0.095:  # Allow small variance
+                            await add_subscription(user_id, months=1)
+                            print(f"✅ Activated subscription for user {user_id}")
 
-                                print(f"✅ Credited {amount_ton} TON to user {user_id}")
+                            # Notify user via both bots
+                            for b in [bot, memeseal_bot]:
+                                if b:
+                                    try:
+                                        await b.send_message(
+                                            user_id,
+                                            "✅ **Subscription Activated!**\n\n"
+                                            "You now have unlimited notarizations for 30 days!\n\n"
+                                            "Send me a file or contract address to seal it! 🔒",
+                                            parse_mode="Markdown"
+                                        )
+                                        break  # Only send once
+                                    except:
+                                        pass
 
-                                # Notify user
-                                try:
-                                    await bot.send_message(
-                                        user_id,
-                                        "✅ **Payment Received!**\n\n"
-                                        f"You can now notarize one contract.\n\n"
-                                        "Use /notarize to get started! 🔒",
-                                        parse_mode="Markdown"
-                                    )
-                                except Exception as notify_error:
-                                    print(f"Could not notify user {user_id}: {notify_error}")
+                        # Check if it's a single notarization payment (0.001 TON)
+                        elif amount_ton >= 0.0009:  # Allow small variance
+                            # Add to database as paid credit
+                            async with aiosqlite.connect(DB_PATH) as db:
+                                await db.execute("""
+                                    INSERT OR IGNORE INTO users (user_id) VALUES (?)
+                                """, (user_id,))
+                                await db.execute("""
+                                    UPDATE users
+                                    SET total_paid = total_paid + ?
+                                    WHERE user_id = ?
+                                """, (amount_ton, user_id))
+                                await db.commit()
 
-                    # Update last processed lt
-                    if not last_processed_lt or tx.lt > last_processed_lt:
-                        last_processed_lt = tx.lt
+                            print(f"✅ Credited {amount_ton} TON to user {user_id}")
 
-            except Exception as tx_error:
-                print(f"Error processing transactions: {tx_error}")
+                            # Notify user via both bots
+                            for b in [bot, memeseal_bot]:
+                                if b:
+                                    try:
+                                        await b.send_message(
+                                            user_id,
+                                            "✅ **Payment Received!**\n\n"
+                                            f"You can now notarize one contract.\n\n"
+                                            "Send me a file or contract address! 🔒",
+                                            parse_mode="Markdown"
+                                        )
+                                        break  # Only send once
+                                    except:
+                                        pass
 
+                # Update last processed lt
+                if not last_processed_lt or tx.lt > last_processed_lt:
+                    last_processed_lt = tx.lt
+
+            # Success - reset error counter
+            consecutive_errors = 0
+
+        except asyncio.TimeoutError:
+            consecutive_errors += 1
+            print(f"⚠️ Wallet polling timeout (attempt {consecutive_errors})")
         except Exception as e:
-            print(f"Error polling wallet: {e}")
+            consecutive_errors += 1
+            error_msg = str(e)
+            # Don't spam logs with the same Liteserver error
+            if "651" in error_msg:
+                print(f"⚠️ Liteserver sync issue (attempt {consecutive_errors}) - will retry")
+            else:
+                print(f"❌ Error polling wallet (attempt {consecutive_errors}): {error_msg}")
         finally:
             if client:
-                await client.close_all()
+                try:
+                    await client.close_all()
+                except:
+                    pass
 
-        await asyncio.sleep(30)  # Poll every 30 seconds
+        # Exponential backoff on errors (30s -> 60s -> 120s -> 240s -> 300s max)
+        if consecutive_errors > 0:
+            backoff = min(30 * (2 ** (consecutive_errors - 1)), max_backoff)
+            print(f"🔄 Retrying in {backoff}s...")
+            await asyncio.sleep(backoff)
+        else:
+            await asyncio.sleep(30)  # Normal poll interval
 
 # ========================
 # BOT HANDLERS
@@ -806,92 +829,173 @@ async def cmd_notarize(message: types.Message):
         parse_mode="Markdown"
     )
 
+async def check_user_can_notarize(user_id: int):
+    """Check if user has subscription or credits. Returns (can_notarize, has_subscription)"""
+    has_sub = await get_user_subscription(user_id)
+    if has_sub:
+        return True, True
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT total_paid FROM users WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0] >= 0.001:
+                return True, False
+    return False, False
+
+
+async def deduct_credit(user_id: int):
+    """Deduct one notarization credit from user"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            UPDATE users SET total_paid = total_paid - 0.001 WHERE user_id = ?
+        """, (user_id,))
+        await db.commit()
+
+
+def get_payment_keyboard():
+    """Return standard payment keyboard"""
+    return types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="⭐ Pay 1 Star", callback_data="pay_stars_single")],
+        [types.InlineKeyboardButton(text="💎 Pay 0.001 TON", callback_data="pay_ton_single")],
+        [types.InlineKeyboardButton(text="🚀 Unlimited (15 Stars/mo)", callback_data="pay_stars_sub")]
+    ])
+
+
 @dp.message(F.text)
 async def handle_text_message(message: types.Message):
-    """Handle text messages - look for deploy bot patterns"""
-    text = message.text
+    """Handle text messages - contract addresses, tx hashes, and deploy bot patterns"""
+    text = message.text.strip()
     user_id = message.from_user.id
 
-    # Check if message is from a known deploy bot
+    # Skip if it's a command
+    if text.startswith('/'):
+        return
+
+    # Check if message is from a known deploy bot (auto-notarization in groups)
     sender_username = f"@{message.from_user.username}" if message.from_user.username else None
+    is_deploy_bot = sender_username in DEPLOY_BOTS
 
-    if sender_username not in DEPLOY_BOTS:
-        return  # Ignore messages not from deploy bots
+    # Pattern matching for TON addresses and transactions
+    ton_address_pattern = r'^(EQ|UQ|0:)[A-Za-z0-9_-]{46,48}$'
+    tx_pattern = r'tx:\s*([A-Za-z0-9]+)'
+    hash_pattern = r'^[A-Fa-f0-9]{64}$'
 
-    # Look for tx pattern: "tx: [tx_id]" or similar
-    tx_pattern = r"tx:\s*([A-Za-z0-9]+)"
-    match = re.search(tx_pattern, text, re.IGNORECASE)
+    contract_id = None
 
-    if not match:
+    # Check for TON address
+    if re.match(ton_address_pattern, text):
+        contract_id = text
+    # Check for tx: pattern (from deploy bots)
+    elif match := re.search(tx_pattern, text, re.IGNORECASE):
+        contract_id = match.group(1)
+    # Check for hash verification request
+    elif re.match(hash_pattern, text):
+        # User is trying to verify a hash
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute("""
+                    SELECT tx_hash, timestamp FROM notarizations
+                    WHERE contract_hash = ? ORDER BY timestamp DESC LIMIT 1
+                """, (text,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row:
+                        await message.reply(
+                            f"✅ **VERIFIED**\n\n"
+                            f"Hash: `{text}`\n"
+                            f"Timestamp: {row[1]}\n"
+                            f"Status: Sealed on TON 🔒\n\n"
+                            f"🔗 {WEBHOOK_URL}/api/v1/verify/{text}",
+                            parse_mode="Markdown"
+                        )
+                    else:
+                        await message.reply(
+                            f"❌ **Not Found**\n\n"
+                            f"Hash `{text[:16]}...` has not been notarized yet.\n\n"
+                            f"Want to seal something? Send me a file or contract address!",
+                            parse_mode="Markdown"
+                        )
+        except Exception as e:
+            await message.reply(f"⚠️ Error checking hash: {str(e)}")
+        return
+    else:
+        # Not a recognized pattern - ignore silently in groups, help in DMs
+        if message.chat.type == "private":
+            await message.reply(
+                "🔐 **NotaryTON**\n\n"
+                "Send me:\n"
+                "• A TON contract address (EQ... or UQ...)\n"
+                "• A file or screenshot to notarize\n"
+                "• A hash to verify\n\n"
+                "Or use /notarize to get started!",
+                parse_mode="Markdown"
+            )
         return
 
-    tx_id = match.group(1)
+    # We have a contract to notarize
+    can_notarize, has_sub = await check_user_can_notarize(user_id)
 
-    # Check if user has subscription
-    has_sub = await get_user_subscription(user_id)
-
-    if not has_sub:
-        await message.reply(
-            f"🔍 **New Launch Detected!**\n\n"
-            f"TX: `{tx_id}`\n\n"
-            f"⚠️ Send 0.001 TON to `{SERVICE_TON_WALLET}` (memo: `{user_id}`) to auto-notarize!\n"
-            f"Or /subscribe for unlimited access.",
-            parse_mode="Markdown"
-        )
+    if not can_notarize:
+        if is_deploy_bot:
+            await message.reply(
+                f"🔍 **New Launch Detected!**\n\n"
+                f"Contract: `{contract_id[:20]}...`\n\n"
+                f"⚠️ Send 0.001 TON to `{SERVICE_TON_WALLET}` (memo: `{user_id}`) to notarize!\n"
+                f"Or /subscribe for unlimited access.",
+                parse_mode="Markdown"
+            )
+        else:
+            await message.reply(
+                "⚠️ **Payment Required**\n\n"
+                f"Contract detected: `{contract_id[:20]}...`\n\n"
+                "Choose how to pay:",
+                parse_mode="Markdown",
+                reply_markup=get_payment_keyboard()
+            )
         return
 
-    # Fetch contract code and notarize
+    # Notarize the contract
     try:
-        contract_code = await get_contract_code_from_tx(tx_id)
+        await message.reply("⏳ Fetching contract and sealing on TON...")
+
+        contract_code = await get_contract_code_from_tx(contract_id)
         if not contract_code:
-            await message.reply("❌ Failed to fetch contract code")
+            await message.reply(
+                "❌ **Could not fetch contract**\n\n"
+                "Make sure the address is valid and the contract is deployed.",
+                parse_mode="Markdown"
+            )
             return
 
-        # Hash the contract code
         contract_hash = hash_data(contract_code)
-
-        # Send notarization transaction
-        comment = f"NotaryTON:Launch:{contract_hash[:16]}"
+        comment = f"NotaryTON:Contract:{contract_hash[:16]}"
         await send_ton_transaction(comment, amount_ton=0.001)
+        await log_notarization(user_id, contract_id, contract_hash, paid=True)
 
-        # Log notarization
-        await log_notarization(user_id, tx_id, contract_hash, paid=True)
+        # Deduct credit if not subscription
+        if not has_sub:
+            await deduct_credit(user_id)
 
         await message.reply(
-            f"✅ **Auto-Notarized!**\n\n"
-            f"Contract Hash: `{contract_hash}`\n"
-            f"Proof TX: Check https://tonscan.org for latest\n\n"
+            f"✅ **SEALED!**\n\n"
+            f"Contract: `{contract_id[:30]}...`\n"
+            f"Hash: `{contract_hash}`\n\n"
+            f"🔗 Verify: {WEBHOOK_URL}/api/v1/verify/{contract_hash}\n\n"
             f"Sealed on TON blockchain forever! 🔒",
             parse_mode="Markdown"
         )
     except Exception as e:
-        await message.reply(f"❌ Error: {str(e)}")
+        await message.reply(f"❌ Error notarizing: {str(e)}")
 
 @dp.message(F.document)
 async def handle_document(message: types.Message):
     """Handle file uploads for manual notarization"""
     user_id = message.from_user.id
-    has_sub = await get_user_subscription(user_id)
+    can_notarize, has_sub = await check_user_can_notarize(user_id)
 
-    # Check if user has paid credits
-    has_credit = False
-    if not has_sub:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(
-                "SELECT total_paid FROM users WHERE user_id = ?",
-                (user_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if row and row[0] >= 0.001:
-                    has_credit = True
-
-    if not has_sub and not has_credit:
-        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="⭐ Pay 1 Star", callback_data="pay_stars_single")],
-            [types.InlineKeyboardButton(text="💎 Pay 0.001 TON", callback_data="pay_ton_single")],
-            [types.InlineKeyboardButton(text="🚀 Unlimited (15 Stars/mo)", callback_data="pay_stars_sub")]
-        ])
-
+    if not can_notarize:
         await message.answer(
             "⚠️ **Payment Required to Notarize**\n\n"
             "Choose how to pay:\n\n"
@@ -899,7 +1003,7 @@ async def handle_document(message: types.Message):
             "💎 **0.001 TON** - Native crypto\n"
             "🚀 **15 Stars/mo** - Unlimited access\n",
             parse_mode="Markdown",
-            reply_markup=keyboard
+            reply_markup=get_payment_keyboard()
         )
         return
 
@@ -920,20 +1024,14 @@ async def handle_document(message: types.Message):
 
         # Deduct credit if not subscription
         if not has_sub:
-            async with aiosqlite.connect(DB_PATH) as db:
-                await db.execute("""
-                    UPDATE users
-                    SET total_paid = total_paid - 0.001
-                    WHERE user_id = ?
-                """, (user_id,))
-                await db.commit()
+            await deduct_credit(user_id)
 
         await message.answer(
             f"✅ **SEALED!**\n\n"
             f"File: `{message.document.file_name}`\n"
             f"Hash: `{file_hash}`\n\n"
-            f"Proof stored on TON blockchain forever! 🔒\n"
-            f"Check: https://tonscan.org/address/{SERVICE_TON_WALLET}",
+            f"🔗 Verify: {WEBHOOK_URL}/api/v1/verify/{file_hash}\n\n"
+            f"Proof stored on TON blockchain forever! 🔒",
             parse_mode="Markdown"
         )
     except Exception as e:
@@ -944,6 +1042,56 @@ async def handle_document(message: types.Message):
         os.remove(file_path)
     except:
         pass
+
+
+@dp.message(F.photo)
+async def handle_photo(message: types.Message):
+    """Handle photo/screenshot uploads for notarization"""
+    user_id = message.from_user.id
+    can_notarize, has_sub = await check_user_can_notarize(user_id)
+
+    if not can_notarize:
+        await message.answer(
+            "📸 **Nice screenshot!**\n\n"
+            "1 Star to seal it on TON forever.\n"
+            "Proof you were there. 🔐",
+            parse_mode="Markdown",
+            reply_markup=get_payment_keyboard()
+        )
+        return
+
+    # Download largest photo
+    photo = message.photo[-1]
+    file = await bot.get_file(photo.file_id)
+    file_path = f"downloads/{photo.file_id}.jpg"
+    os.makedirs("downloads", exist_ok=True)
+    await bot.download_file(file.file_path, file_path)
+
+    file_hash = hash_file(file_path)
+    comment = f"NotaryTON:Screenshot:{file_hash[:12]}"
+
+    try:
+        await send_ton_transaction(comment)
+        await log_notarization(user_id, "screenshot", file_hash, paid=True)
+
+        if not has_sub:
+            await deduct_credit(user_id)
+
+        await message.answer(
+            f"✅ **SCREENSHOT SEALED!**\n\n"
+            f"Hash: `{file_hash}`\n\n"
+            f"🔗 Verify: {WEBHOOK_URL}/api/v1/verify/{file_hash}\n\n"
+            f"Proof secured on TON forever! 🔒",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await message.answer(f"❌ Error: {str(e)}")
+
+    try:
+        os.remove(file_path)
+    except:
+        pass
+
 
 # ========================
 # MEMESEAL TON HANDLERS (Degen branding)
@@ -1281,9 +1429,22 @@ if MEMESEAL_WEBHOOK_PATH:
         return {"ok": True}
 
 @app.get("/health")
+@app.head("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - supports both GET and HEAD"""
     return {"status": "running", "bot": "NotaryTON", "version": "2.0-memecoin"}
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    """Serve favicon"""
+    from fastapi.responses import FileResponse
+    favicon_path = "static/favicon.ico"
+    if os.path.exists(favicon_path):
+        return FileResponse(favicon_path)
+    # Fallback to logo.png
+    return FileResponse("static/logo.png", media_type="image/png")
+
 
 from fastapi.responses import HTMLResponse
 
@@ -1298,7 +1459,27 @@ async def verify_page():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Verify a Seal - MemeSeal TON</title>
     <meta name="description" content="Verify any seal on TON blockchain. Paste a hash to check if it's been sealed.">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://notaryton.com/verify">
+    <meta property="og:title" content="Verify a Seal - MemeSeal TON">
+    <meta property="og:description" content="Verify any seal on TON blockchain. Paste a hash to check if it's been sealed.">
+    <meta property="og:image" content="https://notaryton.com/static/memeseal_icon.png">
+    <meta property="og:site_name" content="MemeSeal TON">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Verify a Seal - MemeSeal TON">
+    <meta name="twitter:description" content="Check if any hash has been sealed on TON blockchain.">
+
+    <!-- Favicon -->
     <link rel="icon" type="image/png" href="/static/memeseal_icon.png">
+    <link rel="apple-touch-icon" href="/static/memeseal_icon.png">
+
+    <!-- Analytics -->
+    <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
+
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap');
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -1521,10 +1702,32 @@ async def memeseal_landing():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MemeSeal TON ⚡🐸 - Proof or it didn't happen</title>
     <meta name="description" content="Seal your bags before the rug. Instant on-chain proof on TON. 1 Star or 0.001 TON per seal.">
-    <meta property="og:title" content="MemeSeal TON ⚡🐸">
-    <meta property="og:description" content="Seal your bags before the rug. Instant. Immutable. Forever.">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://notaryton.com/memeseal">
+    <meta property="og:title" content="MemeSeal TON ⚡🐸 - Proof or it didn't happen">
+    <meta property="og:description" content="Seal your bags before the rug. Instant on-chain proof on TON. 1 Star or 0.001 TON per seal.">
     <meta property="og:image" content="https://notaryton.com/static/memeseal_banner.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:site_name" content="MemeSeal TON">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:url" content="https://notaryton.com/memeseal">
+    <meta name="twitter:title" content="MemeSeal TON ⚡🐸 - Proof or it didn't happen">
+    <meta name="twitter:description" content="Seal your bags before the rug. Receipts or GTFO 🐸">
+    <meta name="twitter:image" content="https://notaryton.com/static/memeseal_banner.png">
+
+    <!-- Favicon -->
     <link rel="icon" type="image/png" href="/static/memeseal_icon.png">
+    <link rel="apple-touch-icon" href="/static/memeseal_icon.png">
+
+    <!-- Analytics -->
+    <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
+    <!-- End Analytics -->
+
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap');
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -1844,10 +2047,32 @@ async def landing_page():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NotaryTON - Blockchain Notarization on TON</title>
     <meta name="description" content="Seal any file on TON blockchain. Instant. Immutable. Forever. Starting at 1 Star or 0.001 TON.">
-    <meta property="og:title" content="NotaryTON - Blockchain Notary">
-    <meta property="og:description" content="Seal any file on TON blockchain. Instant. Immutable. Forever.">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://notaryton.com/">
+    <meta property="og:title" content="NotaryTON - Blockchain Notarization on TON">
+    <meta property="og:description" content="Seal any file on TON blockchain. Instant. Immutable. Forever. Starting at 1 Star or 0.001 TON.">
     <meta property="og:image" content="https://notaryton.com/static/logo.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:site_name" content="NotaryTON">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:url" content="https://notaryton.com/">
+    <meta name="twitter:title" content="NotaryTON - Blockchain Notarization on TON">
+    <meta name="twitter:description" content="Seal any file on TON blockchain. Instant. Immutable. Forever.">
+    <meta name="twitter:image" content="https://notaryton.com/static/logo.png">
+
+    <!-- Favicon -->
     <link rel="icon" type="image/png" href="/static/logo.png">
+    <link rel="apple-touch-icon" href="/static/logo.png">
+
+    <!-- Analytics -->
+    <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
+    <!-- End Analytics -->
+
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
