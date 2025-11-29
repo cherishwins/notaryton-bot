@@ -106,6 +106,12 @@ async def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS bot_state (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
         await db.commit()
 
 async def get_user_subscription(user_id: int):
@@ -185,10 +191,14 @@ async def get_contract_code_from_tx(tx_id: str) -> bytes:
                 return b""
 
         except Exception as addr_error:
-            print(f"Could not parse as address: {addr_error}")
-            # If not an address, try to fetch as transaction hash
-            # For now, return the tx_id itself as data to hash
-            return tx_id.encode()
+            # If not an address, check if it's a valid hex hash (64 chars)
+            if re.match(r'^[A-Fa-f0-9]{64}$', tx_id):
+                 # It's a hash, but we can't easily fetch the code without an indexer or knowing the account.
+                 # For now, we'll just notarize the hash itself as requested.
+                 return tx_id.encode()
+            else:
+                 print(f"Invalid contract identifier: {tx_id}")
+                 return b""
 
     except Exception as e:
         print(f"Error fetching contract code: {e}")
@@ -226,7 +236,19 @@ async def send_ton_transaction(comment: str, amount_ton: float = 0.001):
 
 async def poll_wallet_for_payments():
     """Background task to poll wallet for incoming payments with retry logic"""
-    last_processed_lt = None  # Track last processed logical time
+    last_processed_lt = 0
+    
+    # Load last processed LT from DB
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT value FROM bot_state WHERE key = 'last_processed_lt'") as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    last_processed_lt = int(row[0])
+                    print(f"🔄 Resuming payment polling from LT: {last_processed_lt}")
+    except Exception as e:
+        print(f"⚠️ Failed to load last_processed_lt: {e}")
+
     consecutive_errors = 0
     max_backoff = 300  # Max 5 minutes between retries
 
@@ -245,9 +267,14 @@ async def poll_wallet_for_payments():
                 timeout=30
             )
 
+            # Sort transactions by LT ascending (oldest first) to process in order
+            transactions.sort(key=lambda x: x.lt)
+
+            new_max_lt = last_processed_lt
+
             for tx in transactions:
                 # Skip if we've already processed this transaction
-                if last_processed_lt and tx.lt <= last_processed_lt:
+                if tx.lt <= last_processed_lt:
                     continue
 
                 # Check if this is an incoming transaction
@@ -329,9 +356,19 @@ async def poll_wallet_for_payments():
                                     except:
                                         pass
 
-                # Update last processed lt
-                if not last_processed_lt or tx.lt > last_processed_lt:
-                    last_processed_lt = tx.lt
+                # Update max LT seen
+                if tx.lt > new_max_lt:
+                    new_max_lt = tx.lt
+
+            # Update DB if we processed new transactions
+            if new_max_lt > last_processed_lt:
+                last_processed_lt = new_max_lt
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute("""
+                        INSERT INTO bot_state (key, value) VALUES ('last_processed_lt', ?)
+                        ON CONFLICT(key) DO UPDATE SET value = ?
+                    """, (str(last_processed_lt), str(last_processed_lt)))
+                    await db.commit()
 
             # Success - reset error counter
             consecutive_errors = 0

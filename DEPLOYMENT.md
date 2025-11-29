@@ -290,12 +290,18 @@ Your wallet has 0 TON. **Transfer TON first** (see top of this guide).
 
 ### Payments Not Activating
 
-Payment polling is TODO - needs implementation. For now, manually activate subscriptions:
+Payment polling runs automatically every 30 seconds with retry logic. If payments aren't activating:
 
+1. **Check logs** for Liteserver errors (will auto-retry with exponential backoff)
+2. **Verify memo format** - user must include their Telegram user ID as the memo
+3. **Check wallet balance** - bot wallet needs TON to send notarization txs
+
+To manually activate a subscription (emergency only):
 ```python
-# In Python shell or add to bot
+# In Python shell
+import asyncio
 from bot import add_subscription
-await add_subscription(user_id=123456789, months=1)
+asyncio.run(add_subscription(user_id=123456789, months=1))
 ```
 
 ---
