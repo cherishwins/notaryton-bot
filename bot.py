@@ -11,8 +11,10 @@ from aiogram.filters import Command
 from aiogram.types import Update, LabeledPrice, PreCheckoutQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 from dotenv import load_dotenv
 from pytoniq import LiteBalancer, WalletV4R2, Address
-import aiosqlite
 import uvicorn
+
+# Database layer (PostgreSQL with Neon)
+from database import db
 
 # Load .env
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
@@ -53,9 +55,6 @@ MEMESEAL_USERNAME = "MemeSealTON_bot"
 # Mount static files
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Database path
-DB_PATH = "notaryton.db"
 
 # ========================
 # MULTI-LANGUAGE SUPPORT (i18n)
@@ -132,131 +131,38 @@ async def get_user_language(user_id: int) -> str:
     if user_id in user_languages:
         return user_languages[user_id]
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT language FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            if row and row[0]:
-                user_languages[user_id] = row[0]
-                return row[0]
-    return 'en'
+    lang = await db.users.get_language(user_id)
+    user_languages[user_id] = lang
+    return lang
 
 async def set_user_language(user_id: int, lang: str):
     """Set user's language preference"""
     user_languages[user_id] = lang
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT INTO users (user_id, language) VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET language = ?
-        """, (user_id, lang, lang))
-        await db.commit()
+    await db.users.set_language(user_id, lang)
 
 # Minimum withdrawal amount
 MIN_WITHDRAWAL_TON = 0.05
 
 # ========================
-# DATABASE FUNCTIONS
+# DATABASE FUNCTIONS (using PostgreSQL via database.py)
 # ========================
-
-async def init_db():
-    """Initialize SQLite database"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                subscription_expiry TIMESTAMP,
-                total_paid REAL DEFAULT 0,
-                referral_code TEXT UNIQUE,
-                referred_by INTEGER,
-                referral_earnings REAL DEFAULT 0,
-                total_withdrawn REAL DEFAULT 0,
-                withdrawal_wallet TEXT,
-                language TEXT DEFAULT 'en',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        # Migration: Add new columns to existing tables
-        for col, default in [
-            ("language", "'en'"),
-            ("withdrawal_wallet", "NULL"),
-            ("total_withdrawn", "0")
-        ]:
-            try:
-                await db.execute(f"ALTER TABLE users ADD COLUMN {col} DEFAULT {default}")
-            except Exception:
-                pass  # Column already exists
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS notarizations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                tx_hash TEXT,
-                contract_hash TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                paid BOOLEAN DEFAULT 0,
-                via_api BOOLEAN DEFAULT 0,
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS pending_payments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                amount REAL,
-                memo TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS api_keys (
-                key TEXT PRIMARY KEY,
-                user_id INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_used TIMESTAMP,
-                requests_count INTEGER DEFAULT 0,
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS bot_state (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """)
-        await db.commit()
 
 async def get_user_subscription(user_id: int):
     """Check if user has active subscription"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT subscription_expiry FROM users WHERE user_id = ?",
-            (user_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row and row[0]:
-                expiry = datetime.fromisoformat(row[0])
-                if expiry > datetime.now():
-                    return True
-            return False
+    return await db.users.has_active_subscription(user_id)
 
 async def add_subscription(user_id: int, months: int = 1):
     """Add or extend subscription"""
-    expiry = datetime.now() + timedelta(days=30 * months)
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT INTO users (user_id, subscription_expiry)
-            VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET subscription_expiry = ?
-        """, (user_id, expiry, expiry))
-        await db.commit()
+    await db.users.add_subscription(user_id, months)
 
 async def log_notarization(user_id: int, tx_hash: str, contract_hash: str, paid: bool = False):
     """Log a notarization event"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT INTO notarizations (user_id, tx_hash, contract_hash, paid)
-            VALUES (?, ?, ?, ?)
-        """, (user_id, tx_hash, contract_hash, paid))
-        await db.commit()
+    await db.notarizations.create(
+        user_id=user_id,
+        tx_hash=tx_hash,
+        contract_hash=contract_hash,
+        paid=paid
+    )
 
 # ========================
 # TON FUNCTIONS
@@ -425,15 +331,13 @@ async def resolve_ton_dns(domain: str) -> str:
 async def poll_wallet_for_payments():
     """Background task to poll wallet for incoming payments with retry logic"""
     last_processed_lt = 0
-    
+
     # Load last processed LT from DB
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute("SELECT value FROM bot_state WHERE key = 'last_processed_lt'") as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    last_processed_lt = int(row[0])
-                    print(f"🔄 Resuming payment polling from LT: {last_processed_lt}")
+        lt_value = await db.bot_state.get('last_processed_lt')
+        if lt_value:
+            last_processed_lt = int(lt_value)
+            print(f"🔄 Resuming payment polling from LT: {last_processed_lt}")
     except Exception as e:
         print(f"⚠️ Failed to load last_processed_lt: {e}")
 
@@ -494,20 +398,12 @@ async def poll_wallet_for_payments():
 
                     if user_id:
                         # Credit referrer with 5% commission
-                        async with aiosqlite.connect(DB_PATH) as db:
-                            async with db.execute(
-                                "SELECT referred_by FROM users WHERE user_id = ?", (user_id,)
-                            ) as cursor:
-                                row = await cursor.fetchone()
-                                if row and row[0]:
-                                    referrer_id = row[0]
-                                    commission = amount_ton * 0.05
-                                    await db.execute("""
-                                        UPDATE users SET referral_earnings = COALESCE(referral_earnings, 0) + ?
-                                        WHERE user_id = ?
-                                    """, (commission, referrer_id))
-                                    await db.commit()
-                                    print(f"💰 Credited {commission:.4f} TON to referrer {referrer_id}")
+                        user = await db.users.get(user_id)
+                        if user and user.referred_by:
+                            referrer_id = user.referred_by
+                            commission = amount_ton * 0.05
+                            await db.users.add_referral_earnings(referrer_id, commission)
+                            print(f"💰 Credited {commission:.4f} TON to referrer {referrer_id}")
 
                         # Check if it's a subscription payment (0.1 TON)
                         if amount_ton >= 0.095:  # Allow small variance
@@ -532,16 +428,8 @@ async def poll_wallet_for_payments():
                         # Check if it's a single notarization payment (0.001 TON)
                         elif amount_ton >= 0.0009:  # Allow small variance
                             # Add to database as paid credit
-                            async with aiosqlite.connect(DB_PATH) as db:
-                                await db.execute("""
-                                    INSERT OR IGNORE INTO users (user_id) VALUES (?)
-                                """, (user_id,))
-                                await db.execute("""
-                                    UPDATE users
-                                    SET total_paid = total_paid + ?
-                                    WHERE user_id = ?
-                                """, (amount_ton, user_id))
-                                await db.commit()
+                            await db.users.ensure_exists(user_id)
+                            await db.users.add_payment(user_id, amount_ton)
 
                             print(f"✅ Credited {amount_ton} TON to user {user_id}")
 
@@ -567,12 +455,7 @@ async def poll_wallet_for_payments():
             # Update DB if we processed new transactions
             if new_max_lt > last_processed_lt:
                 last_processed_lt = new_max_lt
-                async with aiosqlite.connect(DB_PATH) as db:
-                    await db.execute("""
-                        INSERT INTO bot_state (key, value) VALUES ('last_processed_lt', ?)
-                        ON CONFLICT(key) DO UPDATE SET value = ?
-                    """, (str(last_processed_lt), str(last_processed_lt)))
-                    await db.commit()
+                await db.bot_state.set('last_processed_lt', str(last_processed_lt))
 
             # Success - reset error counter
             consecutive_errors = 0
@@ -617,36 +500,26 @@ async def cmd_start(message: types.Message):
         referral_code = message.text.split()[1]
     
     # Create user if doesn't exist
-    async with aiosqlite.connect(DB_PATH) as db:
-        if referral_code and referral_code.startswith("REF"):
-            # Extract referrer's user_id from referral code
+    if referral_code and referral_code.startswith("REF"):
+        # Extract referrer's user_id from referral code
+        try:
+            referrer_id = int(referral_code.replace("REF", ""))
+            await db.users.create(user_id, referred_by=referrer_id)
+
+            # Notify referrer
             try:
-                referrer_id = int(referral_code.replace("REF", ""))
-                await db.execute("""
-                    INSERT INTO users (user_id, referred_by)
-                    VALUES (?, ?)
-                    ON CONFLICT(user_id) DO UPDATE SET referred_by = ?
-                    WHERE referred_by IS NULL
-                """, (user_id, referrer_id, referrer_id))
-                await db.commit()
-                
-                # Notify referrer
-                try:
-                    await bot.send_message(
-                        referrer_id,
-                        f"🎉 New referral! User {user_id} joined via your link.\n"
-                        f"You'll earn 5% of their payments!"
-                    )
-                except Exception:
-                    pass
+                await bot.send_message(
+                    referrer_id,
+                    f"🎉 New referral! User {user_id} joined via your link.\n"
+                    f"You'll earn 5% of their payments!"
+                )
             except Exception:
                 pass
-        else:
-            # Just create user entry
-            await db.execute("""
-                INSERT OR IGNORE INTO users (user_id) VALUES (?)
-            """, (user_id,))
-            await db.commit()
+        except Exception:
+            await db.users.ensure_exists(user_id)
+    else:
+        # Just create user entry
+        await db.users.ensure_exists(user_id)
     
     welcome_msg = (
         "🔐 **NotaryTON - Blockchain Infrastructure for TON**\n\n"
@@ -788,48 +661,39 @@ async def process_inline_query(inline_query: InlineQuery):
     else:
         # Query provided - look up the hash
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute("""
-                    SELECT tx_hash, timestamp, contract_hash
-                    FROM notarizations
-                    WHERE contract_hash LIKE ?
-                    ORDER BY timestamp DESC
-                    LIMIT 5
-                """, (f"{query_text}%",)) as cursor:
-                    rows = await cursor.fetchall()
+            notarizations = await db.notarizations.find_by_hash(query_text)
 
-                    if rows:
-                        for i, row in enumerate(rows):
-                            tx_hash, timestamp, contract_hash = row
-                            results.append(
-                                InlineQueryResultArticle(
-                                    id=f"result_{i}",
-                                    title=f"✅ Verified: {contract_hash[:16]}...",
-                                    description=f"Notarized on {timestamp}",
-                                    input_message_content=InputTextMessageContent(
-                                        message_text=f"✅ **VERIFIED NOTARIZATION**\n\n"
-                                                     f"🔐 Hash: `{contract_hash}`\n"
-                                                     f"📅 Timestamp: {timestamp}\n"
-                                                     f"⛓️ Blockchain: TON\n\n"
-                                                     f"🔗 Verify: https://notaryton.com/api/v1/verify/{contract_hash}",
-                                        parse_mode="Markdown"
-                                    )
-                                )
-                            )
-                    else:
-                        results.append(
-                            InlineQueryResultArticle(
-                                id="not_found",
-                                title=f"❌ Not Found: {query_text[:16]}...",
-                                description="No notarization found for this hash",
-                                input_message_content=InputTextMessageContent(
-                                    message_text=f"❌ **NOT FOUND**\n\n"
-                                                 f"No notarization found for:\n`{query_text}`\n\n"
-                                                 f"🔐 Want to notarize? Use @NotaryTON_bot",
-                                    parse_mode="Markdown"
-                                )
+            if notarizations:
+                for i, n in enumerate(notarizations[:5]):
+                    results.append(
+                        InlineQueryResultArticle(
+                            id=f"result_{i}",
+                            title=f"✅ Verified: {n.contract_hash[:16]}...",
+                            description=f"Notarized on {n.timestamp}",
+                            input_message_content=InputTextMessageContent(
+                                message_text=f"✅ **VERIFIED NOTARIZATION**\n\n"
+                                             f"🔐 Hash: `{n.contract_hash}`\n"
+                                             f"📅 Timestamp: {n.timestamp}\n"
+                                             f"⛓️ Blockchain: TON\n\n"
+                                             f"🔗 Verify: https://notaryton.com/api/v1/verify/{n.contract_hash}",
+                                parse_mode="Markdown"
                             )
                         )
+                    )
+            else:
+                results.append(
+                    InlineQueryResultArticle(
+                        id="not_found",
+                        title=f"❌ Not Found: {query_text[:16]}...",
+                        description="No notarization found for this hash",
+                        input_message_content=InputTextMessageContent(
+                            message_text=f"❌ **NOT FOUND**\n\n"
+                                         f"No notarization found for:\n`{query_text}`\n\n"
+                                         f"🔐 Want to notarize? Use @NotaryTON_bot",
+                            parse_mode="Markdown"
+                        )
+                    )
+                )
         except Exception as e:
             print(f"Inline query error: {e}")
             results.append(
@@ -873,11 +737,7 @@ async def process_successful_payment(message: types.Message):
 
         # Update total paid (convert Stars to approximate TON value)
         stars_value_ton = payment.total_amount * 0.001  # Rough conversion
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("""
-                UPDATE users SET total_paid = total_paid + ? WHERE user_id = ?
-            """, (stars_value_ton, user_id))
-            await db.commit()
+        await db.users.add_payment(user_id, stars_value_ton)
 
         await message.answer(
             "✅ **Subscription Activated!**\n\n"
@@ -890,14 +750,8 @@ async def process_successful_payment(message: types.Message):
 
     elif payload.startswith("single_"):
         # Add single notarization credit
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("""
-                INSERT OR IGNORE INTO users (user_id) VALUES (?)
-            """, (user_id,))
-            await db.execute("""
-                UPDATE users SET total_paid = total_paid + 0.001 WHERE user_id = ?
-            """, (user_id,))
-            await db.commit()
+        await db.users.ensure_exists(user_id)
+        await db.users.add_payment(user_id, 0.001)
 
         await message.answer(
             "✅ **Payment Received!**\n\n"
@@ -914,33 +768,25 @@ async def process_successful_payment(message: types.Message):
 async def cmd_status(message: types.Message):
     user_id = message.from_user.id
     has_sub = await get_user_subscription(user_id)
-    
+
     # Get user stats
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT total_paid, referral_earnings, referral_code
-            FROM users WHERE user_id = ?
-        """, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            stats = {
-                "total_paid": row[0] if row else 0,
-                "referral_earnings": row[1] if row else 0,
-                "referral_code": row[2] if row else None
-            }
-        
-        async with db.execute("""
-            SELECT COUNT(*) FROM notarizations WHERE user_id = ?
-        """, (user_id,)) as cursor:
-            stats["notarizations"] = (await cursor.fetchone())[0]
+    user = await db.users.get(user_id)
+    notarization_count = await db.notarizations.count_by_user(user_id)
+
+    stats = {
+        "total_paid": user.total_paid if user else 0,
+        "referral_earnings": user.referral_earnings if user else 0,
+        "notarizations": notarization_count
+    }
 
     status_msg = "✅ **Active Subscription**\n\n" if has_sub else "❌ **No Active Subscription**\n\n"
     status_msg += f"📊 **Your Stats:**\n"
     status_msg += f"• Notarizations: {stats['notarizations']}\n"
     status_msg += f"• Total Spent: {stats['total_paid']:.4f} TON\n"
-    
+
     if stats['referral_earnings'] > 0:
         status_msg += f"• Referral Earnings: {stats['referral_earnings']:.4f} TON\n"
-    
+
     if not has_sub:
         status_msg += "\nUse /subscribe to get unlimited access!"
     
@@ -949,46 +795,19 @@ async def cmd_status(message: types.Message):
 @dp.message(Command("referral"))
 async def cmd_referral(message: types.Message):
     user_id = message.from_user.id
-    
-    # Generate referral code if doesn't exist
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT referral_code FROM users WHERE user_id = ?
-        """, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            
-            if row and row[0]:
-                referral_code = row[0]
-            else:
-                # Generate unique referral code
-                referral_code = f"REF{user_id}"
-                await db.execute("""
-                    INSERT INTO users (user_id, referral_code)
-                    VALUES (?, ?)
-                    ON CONFLICT(user_id) DO UPDATE SET referral_code = ?
-                """, (user_id, referral_code, referral_code))
-                await db.commit()
-        
-        # Count referrals
-        async with db.execute("""
-            SELECT COUNT(*), COALESCE(SUM(total_paid), 0)
-            FROM users WHERE referred_by = ?
-        """, (user_id,)) as cursor:
-            ref_count, ref_revenue = await cursor.fetchone()
-    
+
+    # Get or generate referral code
+    referral_stats = await db.users.get_referral_stats(user_id)
+    referral_code = referral_stats['code']
+
+    if not referral_code:
+        # Generate unique referral code
+        referral_code = f"REF{user_id}"
+        await db.users.ensure_exists(user_id)
+        await db.users.set_referral_code(user_id, referral_code)
+        referral_stats = await db.users.get_referral_stats(user_id)
+
     referral_url = f"https://t.me/NotaryTON_bot?start={referral_code}"
-
-    # Get withdrawal stats
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT COALESCE(referral_earnings, 0), COALESCE(total_withdrawn, 0)
-            FROM users WHERE user_id = ?
-        """, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            total_earnings = row[0] if row else 0
-            total_withdrawn = row[1] if row else 0
-
-    available = total_earnings - total_withdrawn
 
     await message.answer(
         f"🎁 **Referral Program**\n\n"
@@ -996,10 +815,10 @@ async def cmd_referral(message: types.Message):
         f"`{referral_url}`\n\n"
         f"**Commission:** 5% of referrals' payments\n"
         f"**Your Stats:**\n"
-        f"• Referrals: {ref_count}\n"
-        f"• Total Earnings: {total_earnings:.4f} TON\n"
-        f"• Withdrawn: {total_withdrawn:.4f} TON\n"
-        f"• Available: {available:.4f} TON\n\n"
+        f"• Referrals: {referral_stats['count']}\n"
+        f"• Total Earnings: {referral_stats['earnings']:.4f} TON\n"
+        f"• Withdrawn: {referral_stats['withdrawn']:.4f} TON\n"
+        f"• Available: {referral_stats['available']:.4f} TON\n\n"
         f"💡 Use /withdraw to cash out!",
         parse_mode="Markdown"
     )
@@ -1011,18 +830,13 @@ async def cmd_withdraw(message: types.Message):
     args = message.text.split()[1:] if len(message.text.split()) > 1 else []
 
     # Get user's available balance
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT COALESCE(referral_earnings, 0), COALESCE(total_withdrawn, 0), withdrawal_wallet
-            FROM users WHERE user_id = ?
-        """, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            if not row:
-                await message.answer("⚠️ No earnings yet. Share your /referral link to start earning!")
-                return
+    user = await db.users.get(user_id)
+    if not user:
+        await message.answer("⚠️ No earnings yet. Share your /referral link to start earning!")
+        return
 
-            total_earnings, total_withdrawn, saved_wallet = row
-            available = total_earnings - total_withdrawn
+    available = user.available_balance
+    saved_wallet = user.withdrawal_wallet
 
     # Check if wallet address was provided
     wallet_address = None
@@ -1034,12 +848,7 @@ async def cmd_withdraw(message: types.Message):
                 Address(potential_wallet)
                 wallet_address = potential_wallet
                 # Save wallet for future
-                async with aiosqlite.connect(DB_PATH) as db:
-                    await db.execute(
-                        "UPDATE users SET withdrawal_wallet = ? WHERE user_id = ?",
-                        (wallet_address, user_id)
-                    )
-                    await db.commit()
+                await db.users.set_withdrawal_wallet(user_id, wallet_address)
             except Exception:
                 await message.answer("⚠️ Invalid wallet address format.")
                 return
@@ -1077,12 +886,7 @@ async def cmd_withdraw(message: types.Message):
         )
 
         # Update DB
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
-                "UPDATE users SET total_withdrawn = total_withdrawn + ? WHERE user_id = ?",
-                (available, user_id)
-            )
-            await db.commit()
+        await db.users.record_withdrawal(user_id, available)
 
         await message.answer(
             f"✅ **Withdrawal Sent!**\n\n"
@@ -1222,24 +1026,15 @@ async def check_user_can_notarize(user_id: int):
     if has_sub:
         return True, True
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT total_paid FROM users WHERE user_id = ?",
-            (user_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row and row[0] >= 0.001:
-                return True, False
+    total_paid = await db.users.get_total_paid(user_id)
+    if total_paid >= 0.001:
+        return True, False
     return False, False
 
 
 async def deduct_credit(user_id: int):
     """Deduct one notarization credit from user"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            UPDATE users SET total_paid = total_paid - 0.001 WHERE user_id = ?
-        """, (user_id,))
-        await db.commit()
+    await db.users.deduct_payment(user_id, 0.001)
 
 
 def get_payment_keyboard():
@@ -1282,28 +1077,23 @@ async def handle_text_message(message: types.Message):
     elif re.match(hash_pattern, text):
         # User is trying to verify a hash
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute("""
-                    SELECT tx_hash, timestamp FROM notarizations
-                    WHERE contract_hash = ? ORDER BY timestamp DESC LIMIT 1
-                """, (text,)) as cursor:
-                    row = await cursor.fetchone()
-                    if row:
-                        await message.reply(
-                            f"✅ **VERIFIED**\n\n"
-                            f"Hash: `{text}`\n"
-                            f"Timestamp: {row[1]}\n"
-                            f"Status: Sealed on TON 🔒\n\n"
-                            f"🔗 {WEBHOOK_URL}/api/v1/verify/{text}",
-                            parse_mode="Markdown"
-                        )
-                    else:
-                        await message.reply(
-                            f"❌ **Not Found**\n\n"
-                            f"Hash `{text[:16]}...` has not been notarized yet.\n\n"
-                            f"Want to seal something? Send me a file or contract address!",
-                            parse_mode="Markdown"
-                        )
+            notarization = await db.notarizations.get_by_hash(text)
+            if notarization:
+                await message.reply(
+                    f"✅ **VERIFIED**\n\n"
+                    f"Hash: `{text}`\n"
+                    f"Timestamp: {notarization.timestamp}\n"
+                    f"Status: Sealed on TON 🔒\n\n"
+                    f"🔗 {WEBHOOK_URL}/api/v1/verify/{text}",
+                    parse_mode="Markdown"
+                )
+            else:
+                await message.reply(
+                    f"❌ **Not Found**\n\n"
+                    f"Hash `{text[:16]}...` has not been notarized yet.\n\n"
+                    f"Want to seal something? Send me a file or contract address!",
+                    parse_mode="Markdown"
+                )
         except Exception as e:
             await message.reply(f"⚠️ Error checking hash: {str(e)}")
         return
@@ -2760,38 +2550,30 @@ async def api_notarize(request: Request):
 async def api_verify(contract_hash: str):
     """
     Public verification endpoint - anyone can verify a notarization
-    
+
     GET /api/v1/verify/{hash}
-    
+
     Returns: Notarization details including timestamp, tx_hash, etc.
     """
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute("""
-                SELECT tx_hash, timestamp, user_id
-                FROM notarizations
-                WHERE contract_hash = ?
-                ORDER BY timestamp DESC
-                LIMIT 1
-            """, (contract_hash,)) as cursor:
-                row = await cursor.fetchone()
-                
-                if row:
-                    return {
-                        "verified": True,
-                        "hash": contract_hash,
-                        "tx_hash": row[0],
-                        "timestamp": row[1],
-                        "notarized_by": "NotaryTON",
-                        "blockchain": "TON",
-                        "explorer_url": f"https://tonscan.org/tx/{row[0]}"
-                    }
-                else:
-                    return {
-                        "verified": False,
-                        "hash": contract_hash,
-                        "message": "No notarization found for this hash"
-                    }
+        notarization = await db.notarizations.get_by_hash(contract_hash)
+
+        if notarization:
+            return {
+                "verified": True,
+                "hash": contract_hash,
+                "tx_hash": notarization.tx_hash,
+                "timestamp": str(notarization.timestamp) if notarization.timestamp else None,
+                "notarized_by": "NotaryTON",
+                "blockchain": "TON",
+                "explorer_url": f"https://tonscan.org/tx/{notarization.tx_hash}"
+            }
+        else:
+            return {
+                "verified": False,
+                "hash": contract_hash,
+                "message": "No notarization found for this hash"
+            }
     except Exception as e:
         return {"verified": False, "error": str(e)}
 
@@ -2866,11 +2648,8 @@ async def api_batch_notarize(request: Request):
 @app.get("/stats")
 async def stats():
     """Get bot statistics (JSON API)"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT COUNT(*) FROM users") as cursor:
-            total_users = (await cursor.fetchone())[0]
-        async with db.execute("SELECT COUNT(*) FROM notarizations") as cursor:
-            total_notarizations = (await cursor.fetchone())[0]
+    total_users = await db.users.count()
+    total_notarizations = await db.notarizations.count()
 
     return {
         "total_users": total_users,
@@ -2880,55 +2659,52 @@ async def stats():
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     """Visual dashboard for NotaryTON stats"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        # Total stats
-        async with db.execute("SELECT COUNT(*) FROM users") as cursor:
-            total_users = (await cursor.fetchone())[0]
-        async with db.execute("SELECT COUNT(*) FROM notarizations") as cursor:
-            total_notarizations = (await cursor.fetchone())[0]
+    # Total stats
+    total_users = await db.users.count()
+    total_notarizations = await db.notarizations.count()
 
-        # 24h stats
-        async with db.execute("""
+    # 24h stats and other complex queries using raw SQL
+    async with db.pool.acquire() as conn:
+        notarizations_24h = await conn.fetchval("""
             SELECT COUNT(*) FROM notarizations
-            WHERE timestamp > datetime('now', '-1 day')
-        """) as cursor:
-            notarizations_24h = (await cursor.fetchone())[0]
+            WHERE timestamp > NOW() - INTERVAL '1 day'
+        """)
 
-        async with db.execute("""
+        users_24h = await conn.fetchval("""
             SELECT COUNT(*) FROM users
-            WHERE created_at > datetime('now', '-1 day')
-        """) as cursor:
-            users_24h = (await cursor.fetchone())[0]
+            WHERE created_at > NOW() - INTERVAL '1 day'
+        """)
 
         # Revenue stats
-        async with db.execute("SELECT COALESCE(SUM(total_paid), 0) FROM users") as cursor:
-            total_revenue = (await cursor.fetchone())[0]
+        total_revenue = await conn.fetchval(
+            "SELECT COALESCE(SUM(total_paid), 0) FROM users"
+        )
 
         # Referral stats
-        async with db.execute("SELECT COUNT(*) FROM users WHERE referred_by IS NOT NULL") as cursor:
-            total_referrals = (await cursor.fetchone())[0]
+        total_referrals = await conn.fetchval(
+            "SELECT COUNT(*) FROM users WHERE referred_by IS NOT NULL"
+        )
 
-        async with db.execute("SELECT COALESCE(SUM(referral_earnings), 0) FROM users") as cursor:
-            total_referral_earnings = (await cursor.fetchone())[0]
+        total_referral_earnings = await conn.fetchval(
+            "SELECT COALESCE(SUM(referral_earnings), 0) FROM users"
+        )
 
         # Top referrers
-        async with db.execute("""
+        top_referrers = await conn.fetch("""
             SELECT u.user_id, COUNT(r.user_id) as ref_count, COALESCE(u.referral_earnings, 0) as earnings
             FROM users u
             LEFT JOIN users r ON r.referred_by = u.user_id
             WHERE u.referral_code IS NOT NULL
-            GROUP BY u.user_id
+            GROUP BY u.user_id, u.referral_earnings
             ORDER BY ref_count DESC
             LIMIT 5
-        """) as cursor:
-            top_referrers = await cursor.fetchall()
+        """)
 
         # Recent notarizations
-        async with db.execute("""
+        recent_seals = await conn.fetch("""
             SELECT contract_hash, timestamp FROM notarizations
             ORDER BY timestamp DESC LIMIT 10
-        """) as cursor:
-            recent_seals = await cursor.fetchall()
+        """)
 
     return f"""
 <!DOCTYPE html>
@@ -3093,8 +2869,8 @@ async def on_startup():
     """Set webhooks for both bots on startup"""
     global BOT_USERNAME, MEMESEAL_USERNAME
 
-    # Initialize database
-    await init_db()
+    # Initialize database (PostgreSQL via Neon)
+    await db.connect()
 
     # Get bot info
     try:
@@ -3143,7 +2919,8 @@ async def on_shutdown():
     await bot.session.close()
     if memeseal_bot:
         await memeseal_bot.session.close()
-    print("🛑 Bot sessions closed (webhooks preserved)")
+    await db.disconnect()
+    print("🛑 Bot sessions and database closed (webhooks preserved)")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
