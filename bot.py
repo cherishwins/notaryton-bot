@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import Update, LabeledPrice, PreCheckoutQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
@@ -1843,9 +1843,15 @@ async def verify_page():
 </html>
 """
 
-@app.get("/memeseal", response_class=HTMLResponse)
-async def memeseal_landing():
-    """MemeSeal TON - Degen landing page"""
+@app.get("/memeseal")
+async def memeseal_redirect():
+    """Redirect /memeseal to root for backwards compatibility"""
+    return RedirectResponse(url="/", status_code=301)
+
+
+@app.get("/", response_class=HTMLResponse)
+async def landing_page_memeseal():
+    """MemeSeal TON - Main landing page"""
     return f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -1857,7 +1863,7 @@ async def memeseal_landing():
 
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://notaryton.com/memeseal">
+    <meta property="og:url" content="https://notaryton.com/">
     <meta property="og:title" content="MemeSeal TON ⚡🐸 - Proof or it didn't happen">
     <meta property="og:description" content="Seal your bags before the rug. Instant on-chain proof on TON. 1 Star or 0.001 TON per seal.">
     <meta property="og:image" content="https://notaryton.com/static/memeseal_banner.png">
@@ -1867,7 +1873,7 @@ async def memeseal_landing():
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:url" content="https://notaryton.com/memeseal">
+    <meta name="twitter:url" content="https://notaryton.com/">
     <meta name="twitter:title" content="MemeSeal TON ⚡🐸 - Proof or it didn't happen">
     <meta name="twitter:description" content="Seal your bags before the rug. Receipts or GTFO 🐸">
     <meta name="twitter:image" content="https://notaryton.com/static/memeseal_banner.png">
@@ -2188,9 +2194,9 @@ POST /api/v1/notarize<br>
 </html>
 """
 
-@app.get("/", response_class=HTMLResponse)
-async def landing_page():
-    """Marketing landing page"""
+@app.get("/notaryton", response_class=HTMLResponse)
+async def landing_page_legacy():
+    """Legacy NotaryTON landing page"""
     return f"""
 <!DOCTYPE html>
 <html lang="en">
