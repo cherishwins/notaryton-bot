@@ -469,6 +469,12 @@ async def poll_wallet_for_payments():
             # Don't spam logs with the same Liteserver error
             if "651" in error_msg:
                 print(f"⚠️ Liteserver sync issue (attempt {consecutive_errors}) - will retry")
+            elif "lt not in db" in error_msg or "cannot find block" in error_msg:
+                # Stale block reference - reset to start fresh
+                print(f"⚠️ Stale block reference detected - resetting transaction tracking")
+                last_processed_lt = 0
+                await db.bot_state.delete('last_processed_lt')
+                consecutive_errors = 0  # Reset since we fixed the issue
             else:
                 print(f"❌ Error polling wallet (attempt {consecutive_errors}): {error_msg}")
         finally:
