@@ -528,23 +528,16 @@ async def cmd_start(message: types.Message):
         await db.users.ensure_exists(user_id)
     
     welcome_msg = (
-        "🔐 **NotaryTON - Blockchain Infrastructure for TON**\n\n"
-        "Auto-notarize memecoin launches with immutable on-chain proof.\n\n"
+        "🔐 **NotaryTON** → Now **MemeSeal** 🐸\n\n"
+        "We rebranded! Same powerful blockchain notarization, fresh degen vibe.\n\n"
+        "👉 **Check out @MemeSealTON_bot** for the full experience!\n\n"
+        "This bot still works - your subscription & seals carry over.\n\n"
         "**Commands:**\n"
-        "• /subscribe - Unlimited notarizations\n"
-        "• /status - Your stats & subscription\n"
-        "• /notarize - Manually notarize a contract\n"
-        "• /api - Get API access for integrations\n"
-        "• /referral - Earn 5% commission\n\n"
-        "**Features:**\n"
-        "✅ Auto-notarization in groups\n"
-        "✅ Public API for third-party bots\n"
-        "✅ Batch operations for high volume\n"
-        "✅ Instant verification via inline mode\n\n"
-        "💰 **Pricing:**\n"
-        "• ⭐ 1 Star OR 💎 0.001 TON per seal\n"
-        "• ⭐ 15 Stars OR 💎 0.1 TON/month unlimited\n\n"
-        "🚀 **Become Infrastructure** - Every TON launch verified here."
+        "• /subscribe - Unlimited seals\n"
+        "• /status - Your stats\n"
+        "• /notarize - Seal a file\n"
+        "• /referral - Earn 5%\n\n"
+        "💰 ⭐ 1 Star per seal | 15 Stars/mo unlimited"
     )
     
     await message.answer(welcome_msg, parse_mode="Markdown")
@@ -989,14 +982,9 @@ async def cmd_notarize(message: types.Message):
     # Check if user has paid credits
     has_credit = False
     if not has_sub:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(
-                "SELECT total_paid FROM users WHERE user_id = ?",
-                (user_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if row and row[0] >= 0.001:
-                    has_credit = True
+        total_paid = await db.users.get_total_paid(user_id)
+        if total_paid >= 0.001:
+            has_credit = True
 
     if not has_sub and not has_credit:
         # Offer payment options
@@ -1291,18 +1279,12 @@ if memeseal_dp:
             promo_code = message.text.split()[1].upper()
 
         # Create user if doesn't exist
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
-            await db.commit()
+        await db.users.ensure_exists(user_id)
 
         # Check for CHIMPWIN promo (first 500 free seals)
         free_seal_msg = ""
         if promo_code == "CHIMPWIN":
-            async with aiosqlite.connect(DB_PATH) as db:
-                await db.execute("""
-                    UPDATE users SET total_paid = total_paid + 0.001 WHERE user_id = ?
-                """, (user_id,))
-                await db.commit()
+            await db.users.add_payment(user_id, 0.001)
             free_seal_msg = "\n\n🎁 **PROMO ACTIVATED!** You got 1 free seal. LFG!"
 
         welcome_msg = (
@@ -1423,10 +1405,8 @@ if memeseal_dp:
                 parse_mode="Markdown"
             )
         else:
-            async with aiosqlite.connect(DB_PATH) as db:
-                await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
-                await db.execute("UPDATE users SET total_paid = total_paid + 0.001 WHERE user_id = ?", (user_id,))
-                await db.commit()
+            await db.users.ensure_exists(user_id)
+            await db.users.add_payment(user_id, 0.001)
             await message.answer(
                 "✅ **PAID**\n\n"
                 "Now send me what you want sealed.\n"
@@ -1471,11 +1451,9 @@ if memeseal_dp:
 
         has_credit = False
         if not has_sub:
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute("SELECT total_paid FROM users WHERE user_id = ?", (user_id,)) as cursor:
-                    row = await cursor.fetchone()
-                    if row and row[0] >= 0.001:
-                        has_credit = True
+            total_paid = await db.users.get_total_paid(user_id)
+            if total_paid >= 0.001:
+                has_credit = True
 
         if not has_sub and not has_credit:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
@@ -1508,9 +1486,7 @@ if memeseal_dp:
             await log_notarization(user_id, "memeseal_file", file_hash, paid=True)
 
             if not has_sub:
-                async with aiosqlite.connect(DB_PATH) as db:
-                    await db.execute("UPDATE users SET total_paid = total_paid - 0.001 WHERE user_id = ?", (user_id,))
-                    await db.commit()
+                await db.users.deduct_payment(user_id, 0.001)
 
             await message.answer(
                 f"⚡ **SEALED** ⚡\n\n"
@@ -1536,11 +1512,9 @@ if memeseal_dp:
 
         has_credit = False
         if not has_sub:
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute("SELECT total_paid FROM users WHERE user_id = ?", (user_id,)) as cursor:
-                    row = await cursor.fetchone()
-                    if row and row[0] >= 0.001:
-                        has_credit = True
+            total_paid = await db.users.get_total_paid(user_id)
+            if total_paid >= 0.001:
+                has_credit = True
 
         if not has_sub and not has_credit:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
@@ -1572,9 +1546,7 @@ if memeseal_dp:
             await log_notarization(user_id, "memeseal_photo", file_hash, paid=True)
 
             if not has_sub:
-                async with aiosqlite.connect(DB_PATH) as db:
-                    await db.execute("UPDATE users SET total_paid = total_paid - 0.001 WHERE user_id = ?", (user_id,))
-                    await db.commit()
+                await db.users.deduct_payment(user_id, 0.001)
 
             await message.answer(
                 f"⚡ **SCREENSHOT SEALED** ⚡\n\n"
