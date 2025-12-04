@@ -1289,24 +1289,33 @@ if memeseal_dp:
 
         welcome_msg = (
             "⚡🐸 **MEMESEAL TON**\n\n"
-            "Seal your bags before the rug.\n"
-            "One tap = on-chain proof you were early.\n\n"
-            "**What you get:**\n"
-            "• Instant hash on TON (under 1 sec)\n"
-            "• Permanent verification link\n"
-            "• Works with screenshots, wallet connects, anything\n\n"
-            "**Commands:**\n"
-            "• /start - Seal something now\n"
-            "• /unlimited - Go infinite (0.1 TON/mo)\n"
-            "• /api - Dev docs + referral link\n"
-            "• /verify - Check any seal\n\n"
-            "💰 **Price:** 1 Star or 0.001 TON (~$0.05)\n\n"
-            "**Send me a file or screenshot to seal it forever!**\n\n"
-            "receipts or GTFO 🐸"
+            "Proof or it didn't happen.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "**HOW IT WORKS:**\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "**Step 1:** Send me any file 📄\n"
+            "→ Screenshot, contract, wallet pic, anything\n\n"
+            "**Step 2:** Pay 1 ⭐ Star (~$0.02)\n"
+            "→ Tap the payment button\n\n"
+            "**Step 3:** Get your seal 🔒\n"
+            "→ Permanent on-chain proof + verification link\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "**TRY IT NOW:** Just send me a screenshot!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "**MORE OPTIONS:**\n"
+            "• /unlimited - Unlimited seals (15 ⭐/month)\n"
+            "• /verify - Check any seal\n"
+            "• /api - Integrate + earn 5% referrals"
             f"{free_seal_msg}"
         )
 
-        await message.answer(welcome_msg, parse_mode="Markdown")
+        # Add a helpful button
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="📸 How to screenshot on phone", url="https://www.take-a-screenshot.org/")],
+            [types.InlineKeyboardButton(text="💎 Go Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
+        ])
+
+        await message.answer(welcome_msg, parse_mode="Markdown", reply_markup=keyboard)
 
     @memeseal_dp.message(Command("unlimited"))
     async def memeseal_subscribe(message: types.Message):
@@ -1457,15 +1466,18 @@ if memeseal_dp:
 
         if not has_sub and not has_credit:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-                [types.InlineKeyboardButton(text="⭐ 1 Star - Seal it", callback_data="ms_pay_stars_single")],
-                [types.InlineKeyboardButton(text="💎 0.001 TON", callback_data="ms_pay_ton_single")],
-                [types.InlineKeyboardButton(text="🚀 Go Unlimited", callback_data="ms_pay_stars_sub")]
+                [types.InlineKeyboardButton(text="⭐ Pay 1 Star & Seal Now", callback_data="ms_pay_stars_single")],
+                [types.InlineKeyboardButton(text="💎 Pay 0.001 TON instead", callback_data="ms_pay_ton_single")],
+                [types.InlineKeyboardButton(text="🚀 Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
             ])
             await message.answer(
-                "💰 **PAY TO SEAL**\n\n"
-                "1 Star or 0.001 TON.\n"
-                "That's it. Then it's on-chain forever.\n\n"
-                "Or go unlimited for 15 Stars. 🐸",
+                "📄 **Got your file!**\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                "**NEXT STEP:** Tap a button below to pay & seal\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "**Cost:** 1 ⭐ Star (~$0.02)\n"
+                "**What you get:** Permanent on-chain proof + verification link\n\n"
+                "👇 Tap to seal it forever:",
                 parse_mode="Markdown",
                 reply_markup=keyboard
             )
@@ -1518,14 +1530,18 @@ if memeseal_dp:
 
         if not has_sub and not has_credit:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-                [types.InlineKeyboardButton(text="⭐ 1 Star - Seal it", callback_data="ms_pay_stars_single")],
-                [types.InlineKeyboardButton(text="💎 0.001 TON", callback_data="ms_pay_ton_single")],
-                [types.InlineKeyboardButton(text="🚀 Go Unlimited", callback_data="ms_pay_stars_sub")]
+                [types.InlineKeyboardButton(text="⭐ Pay 1 Star & Seal Now", callback_data="ms_pay_stars_single")],
+                [types.InlineKeyboardButton(text="💎 Pay 0.001 TON instead", callback_data="ms_pay_ton_single")],
+                [types.InlineKeyboardButton(text="🚀 Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
             ])
             await message.answer(
-                "📸 **Nice screenshot!**\n\n"
-                "1 Star to seal it on TON forever.\n"
-                "Proof you were there. 🐸",
+                "📸 **Got your screenshot!**\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                "**NEXT STEP:** Tap a button below to pay & seal\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "**Cost:** 1 ⭐ Star (~$0.02)\n"
+                "**What you get:** Permanent on-chain proof + verification link\n\n"
+                "👇 Tap to seal it forever:",
                 parse_mode="Markdown",
                 reply_markup=keyboard
             )
