@@ -115,6 +115,12 @@ TRANSLATIONS = {
 # User language cache (user_id -> lang_code)
 user_languages = {}
 
+# 🐸 PENDING TON PAYMENTS - tracks files waiting for TON payment
+# When user sends file → clicks "Pay with TON" → sends file again, auto-seal
+pending_files = {}  # key: user_id, value: {"file_id": "...", "file_type": "document"|"photo", "timestamp": ...}
+pending_ton_payments = {}  # key: user_id, value: {"memo": "123", "file_id": "...", "file_type": "...", "timestamp": ...}
+import time
+
 def get_text(user_id: int, key: str, **kwargs) -> str:
     """Get translated text for user"""
     lang = user_languages.get(user_id, "en")
@@ -146,6 +152,28 @@ async def set_user_language(user_id: int, lang: str):
     """Set user's language preference"""
     user_languages[user_id] = lang
     await db.users.set_language(user_id, lang)
+
+
+# 🐸 CLEANUP TASK - remove expired pending payments every 5 minutes
+async def cleanup_pending_payments():
+    """Clean up old pending files and TON payments every 5 minutes"""
+    while True:
+        try:
+            now = time.time()
+            # Clean pending_files (expire after 10 min)
+            expired_files = [uid for uid, data in pending_files.items() if now - data["timestamp"] > 600]
+            for uid in expired_files:
+                del pending_files[uid]
+            # Clean pending_ton_payments (expire after 10 min)
+            expired_payments = [uid for uid, data in pending_ton_payments.items() if now - data["timestamp"] > 600]
+            for uid in expired_payments:
+                del pending_ton_payments[uid]
+            if expired_files or expired_payments:
+                print(f"🧹 Cleaned {len(expired_files)} files, {len(expired_payments)} payments")
+        except Exception as e:
+            print(f"⚠️ Cleanup error: {e}")
+        await asyncio.sleep(300)  # Every 5 minutes
+
 
 # Minimum withdrawal amount
 MIN_WITHDRAWAL_TON = 0.05
@@ -1508,12 +1536,24 @@ if memeseal_dp:
     async def memeseal_ton_single(callback: types.CallbackQuery):
         user_id = callback.from_user.id
         await callback.answer()
+
+        # 🐸 Transfer file info to pending TON payments
+        if user_id in pending_files:
+            file_info = pending_files[user_id]
+            pending_ton_payments[user_id] = {
+                "memo": str(user_id),
+                "file_id": file_info["file_id"],
+                "file_type": file_info["file_type"],
+                "timestamp": time.time()
+            }
+            del pending_files[user_id]
+
         await callback.message.answer(
             f"💎 **Pay with TON**\n\n"
             f"Send **0.015 TON** to:\n"
             f"`{SERVICE_TON_WALLET}`\n\n"
             f"**Memo:** `{user_id}`\n\n"
-            f"Then send your file again. We'll seal it. 🐸",
+            f"**Then send your file again - I'll auto-seal it!** 🐸⚡",
             parse_mode="Markdown"
         )
 
@@ -1644,6 +1684,46 @@ if memeseal_dp:
     @memeseal_dp.message(F.document)
     async def memeseal_handle_document(message: types.Message):
         user_id = message.from_user.id
+
+        # 🐸 CHECK FOR PENDING TON PAYMENT - auto-seal if user paid via TON
+        if user_id in pending_ton_payments:
+            pending = pending_ton_payments[user_id]
+            if time.time() - pending["timestamp"] < 600:  # 10 min window
+                # AUTO-SEAL: User clicked "Pay with TON" and is now sending the file
+                file_id = message.document.file_id
+                file = await memeseal_bot.get_file(file_id)
+                file_path = f"downloads/{file_id}"
+                os.makedirs("downloads", exist_ok=True)
+                await memeseal_bot.download_file(file.file_path, file_path)
+
+                file_hash = hash_file(file_path)
+                comment = f"MemeSeal:{file_hash[:16]}"
+
+                try:
+                    await send_ton_transaction(comment)
+                    await log_notarization(user_id, "memeseal_file_ton", file_hash, paid=True)
+                    del pending_ton_payments[user_id]
+
+                    await message.answer(
+                        f"⚡ **TON PAYMENT DETECTED** ⚡\n\n"
+                        f"File: `{message.document.file_name}`\n"
+                        f"Hash: `{file_hash}`\n\n"
+                        f"🔗 Verify: notaryton.com/api/v1/verify/{file_hash}\n\n"
+                        f"Sealed forever. Memo matched. 🐸🎰",
+                        parse_mode="Markdown"
+                    )
+                    asyncio.create_task(announce_seal_to_socials(file_hash))
+                except Exception as e:
+                    await message.answer(f"❌ Seal failed: {str(e)}")
+
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+                return
+            else:
+                del pending_ton_payments[user_id]  # Expired
+
         has_sub = await get_user_subscription(user_id)
 
         has_credit = False
@@ -1653,6 +1733,14 @@ if memeseal_dp:
                 has_credit = True
 
         if not has_sub and not has_credit:
+            # 🐸 Store file info for pending TON payment flow
+            pending_files[user_id] = {
+                "file_id": message.document.file_id,
+                "file_type": "document",
+                "file_name": message.document.file_name,
+                "timestamp": time.time()
+            }
+
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [types.InlineKeyboardButton(text="⭐ Pay 1 Star & Seal Now", callback_data="ms_pay_stars_single")],
                 [types.InlineKeyboardButton(text="💎 Pay 0.015 TON instead", callback_data="ms_pay_ton_single")],
@@ -1709,6 +1797,45 @@ if memeseal_dp:
     async def memeseal_handle_photo(message: types.Message):
         """Handle screenshots/photos"""
         user_id = message.from_user.id
+
+        # 🐸 CHECK FOR PENDING TON PAYMENT - auto-seal if user paid via TON
+        if user_id in pending_ton_payments:
+            pending = pending_ton_payments[user_id]
+            if time.time() - pending["timestamp"] < 600:  # 10 min window
+                # AUTO-SEAL: User clicked "Pay with TON" and is now sending the photo
+                photo = message.photo[-1]
+                file = await memeseal_bot.get_file(photo.file_id)
+                file_path = f"downloads/{photo.file_id}.jpg"
+                os.makedirs("downloads", exist_ok=True)
+                await memeseal_bot.download_file(file.file_path, file_path)
+
+                file_hash = hash_file(file_path)
+                comment = f"MemeSeal:Screenshot:{file_hash[:12]}"
+
+                try:
+                    await send_ton_transaction(comment)
+                    await log_notarization(user_id, "memeseal_photo_ton", file_hash, paid=True)
+                    del pending_ton_payments[user_id]
+
+                    await message.answer(
+                        f"⚡ **TON PAYMENT DETECTED** ⚡\n\n"
+                        f"Hash: `{file_hash}`\n\n"
+                        f"🔗 Verify: notaryton.com/api/v1/verify/{file_hash}\n\n"
+                        f"Screenshot sealed. Memo matched. 🐸🎰",
+                        parse_mode="Markdown"
+                    )
+                    asyncio.create_task(announce_seal_to_socials(file_hash))
+                except Exception as e:
+                    await message.answer(f"❌ Seal failed: {str(e)}")
+
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+                return
+            else:
+                del pending_ton_payments[user_id]  # Expired
+
         has_sub = await get_user_subscription(user_id)
 
         has_credit = False
@@ -1718,6 +1845,13 @@ if memeseal_dp:
                 has_credit = True
 
         if not has_sub and not has_credit:
+            # 🐸 Store photo info for pending TON payment flow
+            pending_files[user_id] = {
+                "file_id": message.photo[-1].file_id,
+                "file_type": "photo",
+                "timestamp": time.time()
+            }
+
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [types.InlineKeyboardButton(text="⭐ Pay 1 Star & Seal Now", callback_data="ms_pay_stars_single")],
                 [types.InlineKeyboardButton(text="💎 Pay 0.015 TON instead", callback_data="ms_pay_ton_single")],
@@ -3847,6 +3981,9 @@ async def on_startup():
 
     # Start payment polling task
     asyncio.create_task(poll_wallet_for_payments())
+
+    # 🐸 Start pending payment cleanup task
+    asyncio.create_task(cleanup_pending_payments())
 
     os.makedirs("downloads", exist_ok=True)
 
