@@ -742,11 +742,16 @@ async def process_successful_payment(message: types.Message):
         stars_value_ton = payment.total_amount * 0.001  # Rough conversion
         await db.users.add_payment(user_id, stars_value_ton)
 
+        # 🎰 LOTTERY: Subscriptions get tickets too! 1 ticket per Star
+        await db.lottery.add_entry(user_id, amount_stars=payment.total_amount)
+        ticket_count = await db.lottery.count_user_entries(user_id)
+
         await message.answer(
             "✅ **Subscription Activated!**\n\n"
             "You now have **unlimited notarizations** for 30 days!\n\n"
             "Use /notarize to seal your first contract.\n"
             "Use /api to get API access for integrations.\n\n"
+            f"🎰 **+{payment.total_amount} LOTTERY TICKETS!** (Total: {ticket_count})\n"
             "🔒 Thank you for supporting NotaryTON!",
             parse_mode="Markdown"
         )
@@ -756,12 +761,17 @@ async def process_successful_payment(message: types.Message):
         await db.users.ensure_exists(user_id)
         await db.users.add_payment(user_id, TON_SINGLE_SEAL)
 
+        # 🎰 LOTTERY: Add entry (1 Star = 1 ticket, 20% goes to pot)
+        await db.lottery.add_entry(user_id, amount_stars=payment.total_amount)
+        ticket_count = await db.lottery.count_user_entries(user_id)
+
         await message.answer(
             "✅ **Payment Received!**\n\n"
             "You can now notarize **one contract or file**.\n\n"
             "Send me:\n"
             "• A contract address (EQ...)\n"
             "• Or upload a file\n\n"
+            f"🎰 **+1 LOTTERY TICKET!** (Total: {ticket_count})\n"
             "🔒 I'll seal it on TON blockchain forever!",
             parse_mode="Markdown"
         )
@@ -825,6 +835,77 @@ async def cmd_referral(message: types.Message):
         f"💡 Use /withdraw to cash out!",
         parse_mode="Markdown"
     )
+
+
+def get_next_draw_date() -> str:
+    """Get next Sunday at 12:00 UTC as draw date"""
+    now = datetime.now()
+    days_until_sunday = (6 - now.weekday()) % 7
+    if days_until_sunday == 0 and now.hour >= 12:
+        days_until_sunday = 7
+    next_draw = now + timedelta(days=days_until_sunday)
+    next_draw = next_draw.replace(hour=12, minute=0, second=0, microsecond=0)
+    return next_draw.strftime("%Y-%m-%d %H:%M UTC")
+
+
+@dp.message(Command("pot"))
+async def cmd_pot(message: types.Message):
+    """Show current lottery pot - DEGEN MODE 🎰"""
+    pot_stars = await db.lottery.get_pot_size_stars()
+    pot_ton = await db.lottery.get_pot_size_ton()
+    total_entries = await db.lottery.get_total_entries()
+    unique_players = await db.lottery.get_unique_participants()
+    next_draw = get_next_draw_date()
+
+    await message.answer(
+        f"🎰 **MEMESEAL LOTTERY**\n\n"
+        f"**Current Jackpot:**\n"
+        f"⭐ {pot_stars} Stars (~{pot_ton:.4f} TON)\n\n"
+        f"**Stats:**\n"
+        f"• Total Entries: {total_entries}\n"
+        f"• Unique Players: {unique_players}\n\n"
+        f"**Next Draw:** {next_draw}\n\n"
+        f"💡 Every seal = 1 ticket. 20% of fees go to pot.\n"
+        f"Use /mytickets to check your entries!",
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(Command("mytickets"))
+async def cmd_mytickets(message: types.Message):
+    """Show user's lottery tickets"""
+    user_id = message.from_user.id
+    ticket_count = await db.lottery.count_user_entries(user_id)
+    total_entries = await db.lottery.get_total_entries()
+
+    if total_entries > 0:
+        win_chance = (ticket_count / total_entries) * 100
+    else:
+        win_chance = 0
+
+    next_draw = get_next_draw_date()
+
+    if ticket_count == 0:
+        await message.answer(
+            f"🎫 **Your Lottery Tickets**\n\n"
+            f"You have **0 tickets** in the pot.\n\n"
+            f"**How to get tickets:**\n"
+            f"• 1 seal = 1 lottery ticket\n"
+            f"• 20% of each payment goes to jackpot\n\n"
+            f"Start sealing to enter the draw!\n"
+            f"Next draw: {next_draw}",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            f"🎫 **Your Lottery Tickets**\n\n"
+            f"**Tickets:** {ticket_count}\n"
+            f"**Win Chance:** {win_chance:.2f}%\n\n"
+            f"**Next Draw:** {next_draw}\n\n"
+            f"More seals = more tickets = better odds! 🚀",
+            parse_mode="Markdown"
+        )
+
 
 @dp.message(Command("withdraw"))
 async def cmd_withdraw(message: types.Message):
@@ -1306,14 +1387,16 @@ if memeseal_dp:
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "**1.** Send any file or image\n"
             "**2.** Pay 1 ⭐ Star (~$0.02)\n"
-            "**3.** Get on-chain seal + verification link\n\n"
+            "**3.** Get on-chain seal + verification link\n"
+            "**4.** 🎰 Get lottery ticket (20% feeds pot!)\n\n"
             "👇 **Send something to seal it forever**"
             f"{free_seal_msg}"
         )
 
         # Add helpful buttons
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="🚀 Go Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
+            [types.InlineKeyboardButton(text="🎰 Check Lottery Pot", callback_data="ms_check_pot")],
+            [types.InlineKeyboardButton(text="🚀 Go Unlimited (20 ⭐/mo)", callback_data="ms_pay_stars_sub")]
         ])
 
         await message.answer(welcome_msg, parse_mode="Markdown", reply_markup=keyboard)
@@ -1340,6 +1423,32 @@ if memeseal_dp:
             "Except this one actually works. 🐸",
             parse_mode="Markdown",
             reply_markup=keyboard
+        )
+
+    @memeseal_dp.callback_query(F.data == "ms_check_pot")
+    async def memeseal_check_pot(callback: types.CallbackQuery):
+        """Show lottery pot from button"""
+        await callback.answer()
+        pot_stars = await db.lottery.get_pot_size_stars()
+        pot_ton = await db.lottery.get_pot_size_ton()
+        total_entries = await db.lottery.get_total_entries()
+        unique_players = await db.lottery.get_unique_participants()
+        next_draw = get_next_draw_date()
+        user_tickets = await db.lottery.count_user_entries(callback.from_user.id)
+
+        await callback.message.answer(
+            f"🎰🐸 **THE FROG POT**\n\n"
+            f"**JACKPOT:**\n"
+            f"⭐ {pot_stars} Stars (~{pot_ton:.4f} TON)\n\n"
+            f"📊 **STATS:**\n"
+            f"• Total Entries: {total_entries}\n"
+            f"• Degens Playing: {unique_players}\n"
+            f"• Your Tickets: {user_tickets}\n\n"
+            f"⏰ **NEXT DRAW:** {next_draw}\n\n"
+            f"Every seal = 1 ticket\n"
+            f"20% of fees feed the pot\n\n"
+            f"Seal something to enter! 🚀",
+            parse_mode="Markdown"
         )
 
     @memeseal_dp.callback_query(F.data == "ms_pay_stars_sub")
@@ -1404,6 +1513,11 @@ if memeseal_dp:
         payment = message.successful_payment
         payload = payment.invoice_payload
 
+        # 🎰 LOTTERY: Add entry for EVERY payment
+        await db.users.ensure_exists(user_id)
+        await db.lottery.add_entry(user_id, amount_stars=payment.total_amount)
+        ticket_count = await db.lottery.count_user_entries(user_id)
+
         if "sub" in payload:
             await add_subscription(user_id, months=1)
             await message.answer(
@@ -1411,16 +1525,18 @@ if memeseal_dp:
                 "30 days of infinite seals.\n"
                 "Send me anything - files, screenshots, contracts.\n"
                 "I'll seal them all.\n\n"
+                f"🎰 **+{payment.total_amount} LOTTERY TICKETS!**\n"
+                f"Total tickets: {ticket_count}\n\n"
                 "LFG 🐸🚀",
                 parse_mode="Markdown"
             )
         else:
-            await db.users.ensure_exists(user_id)
             await db.users.add_payment(user_id, TON_SINGLE_SEAL)
             await message.answer(
                 "✅ **PAID**\n\n"
                 "Now send me what you want sealed.\n"
                 "File, screenshot, whatever.\n\n"
+                f"🎰 **+1 LOTTERY TICKET!** ({ticket_count} total)\n"
                 "🐸",
                 parse_mode="Markdown"
             )
@@ -1453,6 +1569,63 @@ if memeseal_dp:
             "in any chat to flex your receipts. 🐸",
             parse_mode="Markdown"
         )
+
+    @memeseal_dp.message(Command("pot"))
+    async def memeseal_pot(message: types.Message):
+        """Show current lottery pot - FULL DEGEN MODE 🎰🐸"""
+        pot_stars = await db.lottery.get_pot_size_stars()
+        pot_ton = await db.lottery.get_pot_size_ton()
+        total_entries = await db.lottery.get_total_entries()
+        unique_players = await db.lottery.get_unique_participants()
+        next_draw = get_next_draw_date()
+
+        await message.answer(
+            f"🎰🐸 **THE FROG POT**\n\n"
+            f"**JACKPOT:**\n"
+            f"⭐ {pot_stars} Stars (~{pot_ton:.4f} TON)\n\n"
+            f"📊 **STATS:**\n"
+            f"• Entries: {total_entries}\n"
+            f"• Degens: {unique_players}\n\n"
+            f"⏰ **NEXT DRAW:** {next_draw}\n\n"
+            f"Every seal = 1 ticket\n"
+            f"20% of fees feed the pot\n\n"
+            f"/mytickets to check your odds 🎫",
+            parse_mode="Markdown"
+        )
+
+    @memeseal_dp.message(Command("mytickets"))
+    async def memeseal_mytickets(message: types.Message):
+        """Show user's lottery tickets - DEGEN STYLE"""
+        user_id = message.from_user.id
+        ticket_count = await db.lottery.count_user_entries(user_id)
+        total_entries = await db.lottery.get_total_entries()
+
+        if total_entries > 0:
+            win_chance = (ticket_count / total_entries) * 100
+        else:
+            win_chance = 0
+
+        next_draw = get_next_draw_date()
+
+        if ticket_count == 0:
+            await message.answer(
+                f"🎫 **YOUR TICKETS: 0**\n\n"
+                f"no tickets = no moon\n\n"
+                f"**GET TICKETS:**\n"
+                f"• Seal anything = 1 ticket\n"
+                f"• More seals = more chances\n\n"
+                f"Start sealing, degen. 🐸",
+                parse_mode="Markdown"
+            )
+        else:
+            await message.answer(
+                f"🎫 **YOUR TICKETS**\n\n"
+                f"**Count:** {ticket_count}\n"
+                f"**Win Odds:** {win_chance:.2f}%\n\n"
+                f"**Next Draw:** {next_draw}\n\n"
+                f"more seals = more tickets = more moon 🚀🐸",
+                parse_mode="Markdown"
+            )
 
     @memeseal_dp.message(F.document)
     async def memeseal_handle_document(message: types.Message):

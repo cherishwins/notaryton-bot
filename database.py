@@ -615,6 +615,7 @@ class Database:
         self._notarizations: Optional[NotarizationRepository] = None
         self._bot_state: Optional[BotStateRepository] = None
         self._api_keys: Optional[ApiKeyRepository] = None
+        self._lottery: Optional[LotteryRepository] = None
 
     @property
     def pool(self) -> Pool:
@@ -645,6 +646,12 @@ class Database:
         if self._api_keys is None:
             raise RuntimeError("Database not connected. Call await db.connect() first.")
         return self._api_keys
+
+    @property
+    def lottery(self) -> LotteryRepository:
+        if self._lottery is None:
+            raise RuntimeError("Database not connected. Call await db.connect() first.")
+        return self._lottery
 
     async def connect(self, database_url: Optional[str] = None) -> None:
         """
@@ -680,6 +687,7 @@ class Database:
         self._notarizations = NotarizationRepository(self._pool)
         self._bot_state = BotStateRepository(self._pool)
         self._api_keys = ApiKeyRepository(self._pool)
+        self._lottery = LotteryRepository(self._pool)
 
         # Initialize schema
         await self._init_schema()
@@ -695,6 +703,7 @@ class Database:
             self._notarizations = None
             self._bot_state = None
             self._api_keys = None
+            self._lottery = None
             print("Database disconnected")
 
     async def _init_schema(self) -> None:
@@ -759,6 +768,18 @@ class Database:
                 )
             """)
 
+            # Lottery entries table - DEGEN MODE 🎰
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS lottery_entries (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT REFERENCES users(user_id),
+                    amount_stars INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    draw_id INTEGER,
+                    won BOOLEAN DEFAULT FALSE
+                )
+            """)
+
             # Create indexes for performance
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_notarizations_user_id
@@ -783,6 +804,14 @@ class Database:
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id
                 ON api_keys(user_id)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_lottery_entries_user_id
+                ON lottery_entries(user_id)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_lottery_entries_draw_id
+                ON lottery_entries(draw_id)
             """)
 
     @asynccontextmanager
