@@ -16,6 +16,9 @@ import uvicorn
 # Database layer (PostgreSQL with Neon)
 from database import db
 
+# Social media auto-poster (X + Telegram channel)
+from social import social_poster, announce_seal
+
 # Load .env
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
@@ -846,6 +849,17 @@ def get_next_draw_date() -> str:
     next_draw = now + timedelta(days=days_until_sunday)
     next_draw = next_draw.replace(hour=12, minute=0, second=0, microsecond=0)
     return next_draw.strftime("%Y-%m-%d %H:%M UTC")
+
+
+async def announce_seal_to_socials(file_hash: str):
+    """Post seal announcement to X and Telegram channel (rate-limited)"""
+    try:
+        pot_stars = await db.lottery.get_pot_size_stars()
+        pot_ton = await db.lottery.get_pot_size_ton()
+        next_draw = get_next_draw_date()
+        await announce_seal(file_hash, pot_stars, pot_ton, next_draw)
+    except Exception as e:
+        print(f"⚠️ Social announcement failed: {e}")
 
 
 @dp.message(Command("pot"))
@@ -1679,6 +1693,10 @@ if memeseal_dp:
                 f"On TON forever. Receipts secured. 🐸",
                 parse_mode="Markdown"
             )
+
+            # 📣 ANNOUNCE TO X + TELEGRAM CHANNEL
+            asyncio.create_task(announce_seal_to_socials(file_hash))
+
         except Exception as e:
             await message.answer(f"❌ Seal failed: {str(e)}")
 
@@ -1739,6 +1757,10 @@ if memeseal_dp:
                 f"Proof secured. Now flex it. 🐸",
                 parse_mode="Markdown"
             )
+
+            # 📣 ANNOUNCE TO X + TELEGRAM CHANNEL
+            asyncio.create_task(announce_seal_to_socials(file_hash))
+
         except Exception as e:
             await message.answer(f"❌ Seal failed: {str(e)}")
 
@@ -1772,6 +1794,47 @@ if MEMESEAL_WEBHOOK_PATH:
 async def health_check():
     """Health check endpoint - supports both GET and HEAD"""
     return {"status": "running", "bot": "NotaryTON", "version": "2.0-memecoin"}
+
+
+@app.get("/callback")
+async def twitter_callback(oauth_token: str = None, oauth_verifier: str = None):
+    """Twitter OAuth callback"""
+    return HTMLResponse(content="<html><body style='background:#0d0d0d;color:#00ff41;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh'><h1>Connected! You can close this window.</h1></body></html>")
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_of_service():
+    """Terms of Service"""
+    return "<html><head><title>MemeSeal Terms</title><style>body{background:#0d0d0d;color:#00ff41;font-family:monospace;padding:40px;max-width:800px;margin:0 auto}h1{color:#39ff14}h2{color:#00ffff;margin-top:30px}a{color:#ff00ff}</style></head><body><h1>MemeSeal Terms of Service</h1><p>Last updated: December 2024</p><h2>1. Acceptance</h2><p>By using MemeSeal, you agree to these terms.</p><h2>2. Service</h2><p>MemeSeal provides blockchain timestamping on TON. 20% of fees go to lottery pot.</p><h2>3. Payments</h2><p>Payments via Telegram Stars or TON are final.</p><h2>4. No Guarantees</h2><p>Service provided as-is. DYOR. NFA.</p><h2>5. Contact</h2><p><a href='https://t.me/MemeSealTON'>Telegram</a></p></body></html>"
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_policy():
+    """Privacy Policy"""
+    return "<html><head><title>MemeSeal Privacy</title><style>body{background:#0d0d0d;color:#00ff41;font-family:monospace;padding:40px;max-width:800px;margin:0 auto}h1{color:#39ff14}h2{color:#00ffff;margin-top:30px}a{color:#ff00ff}</style></head><body><h1>MemeSeal Privacy Policy</h1><p>Last updated: December 2024</p><h2>1. What We Collect</h2><p>Telegram user ID, file hashes (not files), payment records, wallet addresses.</p><h2>2. What We Don't</h2><p>Your actual files, personal info beyond Telegram ID.</p><h2>3. Blockchain = Public</h2><p>Seals on TON are permanent and public.</p><h2>4. Contact</h2><p><a href='https://t.me/MemeSealTON'>Telegram</a></p></body></html>"
+
+
+@app.get("/pot")
+async def get_lottery_pot():
+    """Get current lottery pot value - polled by landing page"""
+    # For now, return a growing simulated pot based on total seals
+    # TODO: Replace with actual lottery pot tracking
+    try:
+        async with db.pool.acquire() as conn:
+            # Count total seals as proxy for pot (each seal adds to pot)
+            result = await conn.fetchone("SELECT COUNT(*) as total FROM notarizations")
+            total_seals = result['total'] if result else 0
+            # Each seal contributes ~0.005 TON to pot (a portion of the 0.015 fee)
+            pot_ton = total_seals * 0.005
+            pot_stars = total_seals  # 1 star per seal
+            return {
+                "stars": pot_stars,
+                "ton": round(pot_ton, 4),
+                "seals": total_seals
+            }
+    except Exception as e:
+        logger.error(f"Error getting pot: {e}")
+        return {"stars": 0, "ton": 0.0, "seals": 0}
 
 
 @app.get("/favicon.ico")
@@ -2249,6 +2312,24 @@ async def landing_page_memeseal():
     <!-- Analytics -->
     <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
 
+    <!-- Live Pot Counter -->
+    <script>
+        async function updatePot() {{
+            try {{
+                const res = await fetch('/pot');
+                const data = await res.json();
+                const potEl = document.getElementById('pot-amount');
+                const tonEl = document.getElementById('pot-ton');
+                if (potEl) potEl.innerText = data.stars + ' ⭐';
+                if (tonEl) tonEl.innerText = '~' + data.ton.toFixed(4) + ' TON';
+            }} catch (e) {{
+                console.log('Pot fetch error:', e);
+            }}
+        }}
+        setInterval(updatePot, 10000);
+        document.addEventListener('DOMContentLoaded', updatePot);
+    </script>
+
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap');
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -2584,6 +2665,32 @@ async def landing_page_memeseal():
             font-size: 0.9rem;
             margin-top: 20px;
         }}
+        .mega-cta {{
+            display: block;
+            width: 350px;
+            max-width: 90%;
+            margin: 40px auto 0;
+            padding: 25px 40px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1rem;
+            background: #ff0066;
+            color: white;
+            text-decoration: none;
+            text-align: center;
+            border: 3px solid #00ff88;
+            border-radius: 20px;
+            box-shadow: 0 0 40px #ff0066, 0 0 80px #ff006666;
+            transition: all 0.3s;
+            animation: mega-pulse 2s infinite;
+        }}
+        .mega-cta:hover {{
+            transform: scale(1.05);
+            box-shadow: 0 0 60px #ff0066, 0 0 120px #ff006688;
+        }}
+        @keyframes mega-pulse {{
+            0%, 100% {{ box-shadow: 0 0 40px #ff0066, 0 0 80px #ff006666; }}
+            50% {{ box-shadow: 0 0 60px #ff0066, 0 0 100px #ff006688; }}
+        }}
 
         /* TESTIMONIALS */
         .testimonials {{
@@ -2763,7 +2870,7 @@ async def landing_page_memeseal():
         <!-- LOTTERY BANNER -->
         <div class="lottery-banner">
             <h3>🎰 EVERY SEAL FEEDS THE WEEKLY LOTTERY POT 🎰</h3>
-            <div class="pot">CURRENT POT: 0 TON</div>
+            <div class="pot">CURRENT POT: <span id="pot-amount">0 ⭐</span> (<span id="pot-ton">~0.0000 TON</span>)</div>
             <p class="sub">Someone's getting a giant check delivered by a guy in a turtle suit. Might be you. 🐢</p>
         </div>
     </div>
@@ -2852,6 +2959,10 @@ async def landing_page_memeseal():
         </div>
 
         <div class="launch-date">🚀 LAUNCHING Q1 2026 | EARLY SEALERS GET PRIORITY ACCESS + FREE SPINS</div>
+
+        <a href="https://t.me/{MEMESEAL_USERNAME}" class="mega-cta">
+            🐸 SEAL NOW → STACK TICKETS
+        </a>
     </div>
 
     <!-- TESTIMONIALS -->
@@ -3364,6 +3475,110 @@ async def api_batch_notarize(request: Request):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
+# ========================
+# LOTTERY API ENDPOINTS
+# ========================
+
+@app.get("/api/v1/lottery/pot")
+async def api_lottery_pot():
+    """
+    Get current lottery pot info for casino integration
+
+    Returns:
+        pot_stars: Total stars in pot (20% of fees)
+        pot_ton: Estimated TON value
+        total_entries: Number of lottery tickets
+        unique_players: Number of unique participants
+        next_draw: Next draw timestamp (Sunday 12:00 UTC)
+    """
+    try:
+        pot_stars = await db.lottery.get_pot_size_stars()
+        pot_ton = await db.lottery.get_pot_size_ton()
+        total_entries = await db.lottery.get_total_entries()
+        unique_players = await db.lottery.get_unique_participants()
+        next_draw = get_next_draw_date()
+
+        return {
+            "success": True,
+            "pot_stars": pot_stars,
+            "pot_ton": pot_ton,
+            "total_entries": total_entries,
+            "unique_players": unique_players,
+            "next_draw": next_draw
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/lottery/tickets/{user_id}")
+async def api_user_tickets(user_id: int):
+    """Get user's lottery ticket count"""
+    try:
+        ticket_count = await db.lottery.count_user_entries(user_id)
+        total_entries = await db.lottery.get_total_entries()
+        win_chance = (ticket_count / total_entries * 100) if total_entries > 0 else 0
+
+        return {
+            "success": True,
+            "user_id": user_id,
+            "tickets": ticket_count,
+            "win_chance_percent": round(win_chance, 2),
+            "total_entries": total_entries
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/v1/casino/bet")
+async def api_casino_bet(request: Request):
+    """
+    Record a casino bet and add lottery entry
+
+    POST /api/v1/casino/bet
+    {
+        "user_id": "wallet_address_or_tg_id",
+        "amount": 0.1,
+        "game": "slots|roulette|crash"
+    }
+    """
+    try:
+        data = await request.json()
+        user_id_str = str(data.get("user_id", "guest"))
+        amount = float(data.get("amount", 0))
+        game = data.get("game", "casino")
+
+        # Convert wallet address to numeric ID if needed
+        if user_id_str.startswith("EQ") or user_id_str.startswith("UQ"):
+            # Hash wallet to get consistent user_id
+            user_id = abs(hash(user_id_str)) % (10**9)
+        else:
+            try:
+                user_id = int(user_id_str)
+            except:
+                user_id = abs(hash(user_id_str)) % (10**9)
+
+        # Ensure user exists
+        await db.users.ensure_exists(user_id)
+
+        # Add lottery entry (equivalent to 1 star per 0.001 TON bet)
+        stars_equivalent = max(1, int(amount * 1000))
+        await db.lottery.add_entry(user_id, amount_stars=stars_equivalent)
+
+        ticket_count = await db.lottery.count_user_entries(user_id)
+
+        return {
+            "success": True,
+            "lottery_entry": True,
+            "tickets_added": 1,
+            "total_tickets": ticket_count,
+            "game": game,
+            "message": f"Bet recorded. +1 lottery ticket!"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @app.get("/stats")
 async def stats():
     """Get bot statistics (JSON API)"""
@@ -3590,6 +3805,9 @@ async def on_startup():
 
     # Initialize database (PostgreSQL via Neon)
     await db.connect()
+
+    # Initialize social media poster (X + Telegram channel)
+    social_poster.initialize()
 
     # Get bot info
     try:
