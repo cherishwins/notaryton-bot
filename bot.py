@@ -1833,7 +1833,7 @@ async def get_lottery_pot():
                 "seals": total_seals
             }
     except Exception as e:
-        logger.error(f"Error getting pot: {e}")
+        print(f"❌ Error getting pot: {e}")
         return {"stars": 0, "ton": 0.0, "seals": 0}
 
 
