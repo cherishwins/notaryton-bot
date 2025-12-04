@@ -80,7 +80,7 @@ class SocialPoster:
         twitter_api_key = os.getenv("TWITTER_API_KEY")
         twitter_api_secret = os.getenv("TWITTER_API_SECRET")
         twitter_access_token = os.getenv("TWITTER_ACCESS_TOKEN")
-        twitter_access_secret = os.getenv("TWITTER_ACCESS_SECRET")
+        twitter_access_secret = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
 
         if all([twitter_api_key, twitter_api_secret, twitter_access_token, twitter_access_secret]):
             try:
