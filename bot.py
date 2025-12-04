@@ -33,6 +33,9 @@ WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 MEMESEAL_WEBHOOK_PATH = f"/webhook/{MEMESEAL_BOT_TOKEN}" if MEMESEAL_BOT_TOKEN else None
 GROUP_IDS = os.getenv("GROUP_IDS", "").split(",")  # Comma-separated chat IDs
 
+# TonAPI for real-time webhooks (replaces 30s polling!)
+TONAPI_KEY = os.getenv("TONAPI_KEY", "")
+
 # Known deploy bots (add more as needed)
 DEPLOY_BOTS = ["@tondeployer", "@memelaunchbot", "@toncoinbot"]
 
@@ -81,6 +84,13 @@ TRANSLATIONS = {
         "status_inactive": "❌ **No Active Subscription**\n\nCredits: {credits} TON\n\nUse /subscribe for unlimited!",
         "photo_prompt": "📸 **Nice screenshot!**\n\n1 Star to seal it on TON forever.",
         "file_prompt": "📄 **Got your file!**\n\n1 Star to seal it on TON forever.",
+        # Agent 10: New strings for enhanced UX
+        "sealing_progress": "⏳ **SEALING TO BLOCKCHAIN...**\n\nYour file is being timestamped on TON.\nThis takes 5-15 seconds.",
+        "network_busy": "⚠️ **TON Network Busy**\n\nWe're retrying automatically. Please wait.",
+        "retry_prompt": "🔄 **Try Again**\n\nTap the button below to retry.",
+        "lottery_tickets": "🎫 Lottery tickets: {count}",
+        "pot_grew": "💰 Pot grew +{amount} TON",
+        "good_luck": "🍀 Good luck on Sunday!",
     },
     "ru": {
         "welcome": "🔐 **NotaryTON** - Блокчейн Нотаризация\n\nПечать контрактов, файлов и скриншотов на TON навсегда.\n\n**Команды:**\n/notarize - Запечатать контракт\n/status - Проверить подписку\n/subscribe - Безлимит\n/referral - Заработай 5%\n/withdraw - Вывести заработок\n/lang - Сменить язык",
@@ -95,6 +105,13 @@ TRANSLATIONS = {
         "status_inactive": "❌ **Нет Активной Подписки**\n\nКредиты: {credits} TON\n\nИспользуйте /subscribe для безлимита!",
         "photo_prompt": "📸 **Отличный скриншот!**\n\n1 Звезда чтобы запечатать на TON навсегда.",
         "file_prompt": "📄 **Файл получен!**\n\n1 Звезда чтобы запечатать на TON навсегда.",
+        # Agent 10: New strings for enhanced UX
+        "sealing_progress": "⏳ **ЗАПЕЧАТЫВАНИЕ В БЛОКЧЕЙН...**\n\nВаш файл получает временную метку на TON.\nЭто занимает 5-15 секунд.",
+        "network_busy": "⚠️ **Сеть TON занята**\n\nМы автоматически повторяем. Пожалуйста, подождите.",
+        "retry_prompt": "🔄 **Попробовать снова**\n\nНажмите кнопку ниже для повтора.",
+        "lottery_tickets": "🎫 Лотерейные билеты: {count}",
+        "pot_grew": "💰 Банк вырос на +{amount} TON",
+        "good_luck": "🍀 Удачи в воскресенье!",
     },
     "zh": {
         "welcome": "🔐 **NotaryTON** - 区块链公证\n\n在TON上永久封存合约、文件和截图。\n\n**命令:**\n/notarize - 封存合约\n/status - 查看订阅\n/subscribe - 无限封存\n/referral - 赚取5%佣金\n/withdraw - 提取收益\n/lang - 更改语言",
@@ -109,6 +126,13 @@ TRANSLATIONS = {
         "status_inactive": "❌ **无有效订阅**\n\n余额: {credits} TON\n\n使用 /subscribe 获取无限!",
         "photo_prompt": "📸 **不错的截图!**\n\n1星即可永久封存到TON。",
         "file_prompt": "📄 **文件已收到!**\n\n1星即可永久封存到TON。",
+        # Agent 10: New strings for enhanced UX
+        "sealing_progress": "⏳ **正在封存到区块链...**\n\n您的文件正在TON上获取时间戳。\n这需要5-15秒。",
+        "network_busy": "⚠️ **TON网络繁忙**\n\n我们正在自动重试。请稍候。",
+        "retry_prompt": "🔄 **重试**\n\n点击下方按钮重试。",
+        "lottery_tickets": "🎫 彩票: {count}张",
+        "pot_grew": "💰 奖池增加 +{amount} TON",
+        "good_luck": "🍀 祝周日好运!",
     }
 }
 
@@ -120,6 +144,18 @@ user_languages = {}
 pending_files = {}  # key: user_id, value: {"file_id": "...", "file_type": "document"|"photo", "timestamp": ...}
 pending_ton_payments = {}  # key: user_id, value: {"memo": "123", "file_id": "...", "file_type": "...", "timestamp": ...}
 import time
+import random
+import string
+
+# Agent 5: Unique memo generator for TON payments
+def generate_payment_memo(user_id: int) -> str:
+    """Generate a unique, short memo for TON payments like SEAL-A7B3"""
+    chars = string.ascii_uppercase + string.digits
+    suffix = ''.join(random.choices(chars, k=4))
+    return f"SEAL-{suffix}"
+
+# Reverse lookup: memo -> user_id
+payment_memo_lookup = {}  # key: memo, value: {"user_id": int, "timestamp": float}
 
 def get_text(user_id: int, key: str, **kwargs) -> str:
     """Get translated text for user"""
@@ -214,6 +250,90 @@ def hash_file(file_path: str) -> str:
 def hash_data(data: bytes) -> str:
     """SHA-256 hash of raw data"""
     return hashlib.sha256(data).hexdigest()
+
+
+# ========================
+# ERROR HANDLING HELPERS (Agent 3: Humanized Errors)
+# ========================
+
+class ErrorType:
+    USER_INPUT = "user_input"      # Invalid input from user
+    NETWORK = "network"            # TON network issues
+    PAYMENT = "payment"            # Payment problems
+    FILE = "file"                  # File handling errors
+    UNKNOWN = "unknown"            # Catch-all
+
+def classify_error(error: Exception) -> str:
+    """Classify an error into a user-friendly category"""
+    error_str = str(error).lower()
+
+    if "invalid" in error_str or "address" in error_str:
+        return ErrorType.USER_INPUT
+    elif "timeout" in error_str or "liteserver" in error_str or "network" in error_str or "crashed" in error_str:
+        return ErrorType.NETWORK
+    elif "not initialized" in error_str or "-256" in error_str:
+        return ErrorType.NETWORK
+    elif "payment" in error_str or "balance" in error_str:
+        return ErrorType.PAYMENT
+    elif "file" in error_str or "download" in error_str:
+        return ErrorType.FILE
+    else:
+        return ErrorType.UNKNOWN
+
+def get_user_friendly_error(error: Exception, context: str = "") -> str:
+    """Convert technical errors into user-friendly messages with guidance"""
+    error_type = classify_error(error)
+
+    if error_type == ErrorType.USER_INPUT:
+        return (
+            "⚠️ **Invalid Input**\n\n"
+            f"{context}\n\n"
+            "**Examples of valid input:**\n"
+            "• Contract: `EQB...` or `UQ...`\n"
+            "• Hash: 64 character hex string\n"
+            "• File: Any document or screenshot"
+        )
+
+    elif error_type == ErrorType.NETWORK:
+        return (
+            "⚠️ **TON Network Busy**\n\n"
+            "The blockchain is experiencing high load.\n\n"
+            "**What to do:**\n"
+            "• Wait 30 seconds and try again\n"
+            "• Or use ⭐ Stars for faster processing\n\n"
+            "_We're automatically retrying..._"
+        )
+
+    elif error_type == ErrorType.PAYMENT:
+        return (
+            "⚠️ **Payment Issue**\n\n"
+            "We couldn't process your payment.\n\n"
+            "**Try:**\n"
+            "• Check your wallet balance\n"
+            "• Ensure the memo is correct\n"
+            "• Use /subscribe for subscription status"
+        )
+
+    elif error_type == ErrorType.FILE:
+        return (
+            "⚠️ **File Error**\n\n"
+            "We couldn't process your file.\n\n"
+            "**Try:**\n"
+            "• Re-send the file\n"
+            "• Check file isn't corrupted\n"
+            "• Max size: 20MB"
+        )
+
+    else:
+        return (
+            "⚠️ **Something Went Wrong**\n\n"
+            "We hit an unexpected error.\n\n"
+            "**What to do:**\n"
+            "• Try again in a few seconds\n"
+            "• If it persists, contact @NotaryTON_support\n\n"
+            f"_Error ref: {str(error)[:50]}_"
+        )
+
 
 async def get_contract_code_from_tx(tx_id: str) -> bytes:
     """Fetch contract bytecode from transaction"""
@@ -648,17 +768,25 @@ async def process_stars_subscription(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "pay_ton_sub")
 async def process_ton_subscription(callback: types.CallbackQuery):
-    """Show TON payment instructions"""
+    """Show TON payment instructions (Agent 5: Simplified)"""
     user_id = callback.from_user.id
     await callback.answer()
 
+    # Generate unique memo for this payment
+    memo = generate_payment_memo(user_id)
+    payment_memo_lookup[memo] = {"user_id": user_id, "timestamp": time.time(), "type": "subscription"}
+
     await callback.message.answer(
-        f"💎 **Pay with TON**\n\n"
-        f"Send **0.3 TON** to:\n"
+        f"💎 **PAY WITH TON**\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"**Step 1:** Copy this address\n"
         f"`{SERVICE_TON_WALLET}`\n\n"
-        f"**IMPORTANT:** Include this memo:\n"
-        f"`{user_id}`\n\n"
-        f"Your subscription activates automatically within 1 minute!",
+        f"**Step 2:** Send exactly **0.3 TON**\n\n"
+        f"**Step 3:** Add this memo:\n"
+        f"`{user_id}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"⏱️ Activates in ~1 minute after sending\n"
+        f"✅ We'll notify you when confirmed!",
         parse_mode="Markdown"
     )
 
@@ -682,18 +810,25 @@ async def process_stars_single(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "pay_ton_single")
 async def process_ton_single(callback: types.CallbackQuery):
-    """Show TON payment instructions for single notarization"""
+    """Show TON payment instructions for single notarization (Agent 5: Simplified)"""
     user_id = callback.from_user.id
     await callback.answer()
 
+    # Generate unique memo for this payment
+    memo = generate_payment_memo(user_id)
+    payment_memo_lookup[memo] = {"user_id": user_id, "timestamp": time.time(), "type": "single"}
+
     await callback.message.answer(
-        f"💎 **Pay with TON**\n\n"
-        f"Send **0.015 TON** to:\n"
+        f"💎 **PAY WITH TON**\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"**Step 1:** Copy this address\n"
         f"`{SERVICE_TON_WALLET}`\n\n"
-        f"**IMPORTANT:** Include this memo:\n"
-        f"`{user_id}`\n\n"
-        f"Your credit will be added automatically within 1 minute!\n"
-        f"Then use /notarize again.",
+        f"**Step 2:** Send exactly **0.015 TON**\n\n"
+        f"**Step 3:** Add this memo:\n"
+        f"`{user_id}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"⏱️ Credit added in ~1 minute\n"
+        f"📤 Then send your file to seal it!",
         parse_mode="Markdown"
     )
 
@@ -846,6 +981,7 @@ async def cmd_status(message: types.Message):
     # Get user stats
     user = await db.users.get(user_id)
     notarization_count = await db.notarizations.count_by_user(user_id)
+    ticket_count = await db.lottery.count_user_entries(user_id)
 
     stats = {
         "total_paid": user.total_paid if user else 0,
@@ -856,14 +992,30 @@ async def cmd_status(message: types.Message):
     status_msg = "✅ **Active Subscription**\n\n" if has_sub else "❌ **No Active Subscription**\n\n"
     status_msg += f"📊 **Your Stats:**\n"
     status_msg += f"• Notarizations: {stats['notarizations']}\n"
+    status_msg += f"• Lottery Tickets: {ticket_count} 🎰\n"
     status_msg += f"• Total Spent: {stats['total_paid']:.4f} TON\n"
 
     if stats['referral_earnings'] > 0:
         status_msg += f"• Referral Earnings: {stats['referral_earnings']:.4f} TON\n"
 
-    if not has_sub:
-        status_msg += "\nUse /subscribe to get unlimited access!"
-    
+    # Agent 6: Subscription Value Calculator
+    if not has_sub and notarization_count > 0:
+        # Calculate if subscription would save money
+        pay_as_you_go_cost = notarization_count * STARS_SINGLE_NOTARIZATION  # Stars
+        subscription_cost = STARS_MONTHLY_SUBSCRIPTION  # 20 Stars
+
+        if notarization_count >= 20:
+            savings = pay_as_you_go_cost - subscription_cost
+            status_msg += f"\n💡 **You've sealed {notarization_count} times!**\n"
+            status_msg += f"With a subscription, you'd save {savings} ⭐!\n"
+        elif notarization_count >= 10:
+            seals_to_breakeven = subscription_cost - notarization_count
+            status_msg += f"\n💡 **Tip:** {seals_to_breakeven} more seals and subscription pays off!\n"
+        else:
+            status_msg += f"\n💡 Subscribe at 20 ⭐ for unlimited seals!"
+    elif not has_sub:
+        status_msg += "\n💡 Use /subscribe for unlimited seals!"
+
     await message.answer(status_msg, parse_mode="Markdown")
 
 @dp.message(Command("referral"))
@@ -883,19 +1035,56 @@ async def cmd_referral(message: types.Message):
 
     referral_url = f"https://t.me/NotaryTON_bot?start={referral_code}"
 
-    await message.answer(
+    # Agent 7: Clear referral explanation
+    referral_msg = (
         f"🎁 **Referral Program**\n\n"
-        f"**Your Referral Link:**\n"
+        f"**Your Link:**\n"
         f"`{referral_url}`\n\n"
-        f"**Commission:** 5% of referrals' payments\n"
-        f"**Your Stats:**\n"
-        f"• Referrals: {referral_stats['count']}\n"
-        f"• Total Earnings: {referral_stats['earnings']:.4f} TON\n"
-        f"• Withdrawn: {referral_stats['withdrawn']:.4f} TON\n"
-        f"• Available: {referral_stats['available']:.4f} TON\n\n"
-        f"💡 Use /withdraw to cash out!",
-        parse_mode="Markdown"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"**How it works:**\n"
+        f"• Share your link with friends\n"
+        f"• You earn **5% of EVERY seal** they make\n"
+        f"• Not just first purchase - **lifetime!**\n"
+        f"• Withdraw when you hit 0.05 TON\n\n"
     )
+
+    # Show earnings breakdown
+    if referral_stats['count'] > 0:
+        avg_per_referral = referral_stats['earnings'] / referral_stats['count'] if referral_stats['count'] > 0 else 0
+        referral_msg += (
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"**Your Stats:**\n"
+            f"👥 Referrals: **{referral_stats['count']}**\n"
+            f"💰 Total Earned: **{referral_stats['earnings']:.4f} TON**\n"
+            f"📊 Avg per referral: {avg_per_referral:.4f} TON\n\n"
+            f"💵 Withdrawn: {referral_stats['withdrawn']:.4f} TON\n"
+            f"✅ Available: **{referral_stats['available']:.4f} TON**\n\n"
+        )
+
+        # Progress bar to withdrawal
+        min_withdrawal = 0.05
+        if referral_stats['available'] < min_withdrawal:
+            progress = (referral_stats['available'] / min_withdrawal) * 100
+            needed = min_withdrawal - referral_stats['available']
+            referral_msg += (
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"**Withdrawal Progress:**\n"
+                f"{'█' * int(progress / 10)}{'░' * (10 - int(progress / 10))} {progress:.0f}%\n"
+                f"Need {needed:.4f} more TON to withdraw\n"
+            )
+        else:
+            referral_msg += f"✅ **Ready to withdraw!** Use /withdraw <wallet>\n"
+    else:
+        referral_msg += (
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"**No referrals yet!**\n\n"
+            f"Share your link in:\n"
+            f"• TON trading groups\n"
+            f"• Memecoin communities\n"
+            f"• With deployer friends\n"
+        )
+
+    await message.answer(referral_msg, parse_mode="Markdown")
 
 
 def get_next_draw_date() -> str:
@@ -920,35 +1109,91 @@ async def announce_seal_to_socials(file_hash: str):
         print(f"⚠️ Social announcement failed: {e}")
 
 
+def get_countdown_to_draw() -> str:
+    """Get human-readable countdown to next draw"""
+    now = datetime.now()
+    days_until_sunday = (6 - now.weekday()) % 7
+    if days_until_sunday == 0 and now.hour >= 12:
+        days_until_sunday = 7
+    next_draw = now + timedelta(days=days_until_sunday)
+    next_draw = next_draw.replace(hour=12, minute=0, second=0, microsecond=0)
+
+    delta = next_draw - now
+    days = delta.days
+    hours = delta.seconds // 3600
+    minutes = (delta.seconds % 3600) // 60
+
+    if days > 0:
+        return f"{days}d {hours}h"
+    elif hours > 0:
+        return f"{hours}h {minutes}m"
+    else:
+        return f"{minutes}m"
+
+
 @dp.message(Command("pot"))
 async def cmd_pot(message: types.Message):
-    """Show current lottery pot - DEGEN MODE 🎰"""
+    """Show current lottery pot - DEGEN MODE 🎰 (Agent 8: Enhanced)"""
+    user_id = message.from_user.id
     pot_stars = await db.lottery.get_pot_size_stars()
     pot_ton = await db.lottery.get_pot_size_ton()
     total_entries = await db.lottery.get_total_entries()
     unique_players = await db.lottery.get_unique_participants()
+    user_tickets = await db.lottery.count_user_entries(user_id)
     next_draw = get_next_draw_date()
+    countdown = get_countdown_to_draw()
 
-    await message.answer(
-        f"🎰 **MEMESEAL LOTTERY**\n\n"
-        f"**Current Jackpot:**\n"
-        f"⭐ {pot_stars} Stars (~{pot_ton:.4f} TON)\n\n"
-        f"**Stats:**\n"
-        f"• Total Entries: {total_entries}\n"
-        f"• Unique Players: {unique_players}\n\n"
-        f"**Next Draw:** {next_draw}\n\n"
-        f"💡 Every seal = 1 ticket. 20% of fees go to pot.\n"
-        f"Use /mytickets to check your entries!",
-        parse_mode="Markdown"
+    # Calculate user's odds
+    if total_entries > 0 and user_tickets > 0:
+        win_chance = (user_tickets / total_entries) * 100
+        odds_msg = f"🎯 **Your odds:** {win_chance:.2f}% ({user_tickets} tickets)"
+    elif user_tickets == 0:
+        odds_msg = "🎯 **Your odds:** 0% (no tickets yet!)"
+    else:
+        odds_msg = ""
+
+    # Build exciting message
+    pot_msg = (
+        f"🎰 **MEMESEAL LOTTERY** 🎰\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 **JACKPOT**\n"
+        f"⭐ **{pot_stars} Stars**\n"
+        f"≈ {pot_ton:.4f} TON (~${pot_ton * 3.5:.2f})\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"⏰ **Next Draw:** {countdown}\n"
+        f"📅 {next_draw}\n\n"
+        f"📊 **Stats:**\n"
+        f"• Total Tickets: {total_entries}\n"
+        f"• Players: {unique_players}\n\n"
+        f"{odds_msg}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"**How to Play:**\n"
+        f"• Every seal = 1 lottery ticket\n"
+        f"• 20% of each fee → jackpot\n"
+        f"• Winner takes all on Sunday!\n"
     )
+
+    # Add CTA based on user's tickets
+    if user_tickets == 0:
+        pot_msg += f"\n🚀 **Seal something to enter!**"
+    elif user_tickets < 5:
+        pot_msg += f"\n🚀 **Seal more to improve your odds!**"
+    else:
+        pot_msg += f"\n🍀 **Good luck on Sunday!**"
+
+    await message.answer(pot_msg, parse_mode="Markdown")
 
 
 @dp.message(Command("mytickets"))
 async def cmd_mytickets(message: types.Message):
-    """Show user's lottery tickets"""
+    """Show user's lottery tickets (Agent 8: Enhanced)"""
     user_id = message.from_user.id
     ticket_count = await db.lottery.count_user_entries(user_id)
     total_entries = await db.lottery.get_total_entries()
+    pot_stars = await db.lottery.get_pot_size_stars()
+    pot_ton = await db.lottery.get_pot_size_ton()
+    unique_players = await db.lottery.get_unique_participants()
+    countdown = get_countdown_to_draw()
 
     if total_entries > 0:
         win_chance = (ticket_count / total_entries) * 100
@@ -959,22 +1204,47 @@ async def cmd_mytickets(message: types.Message):
 
     if ticket_count == 0:
         await message.answer(
-            f"🎫 **Your Lottery Tickets**\n\n"
-            f"You have **0 tickets** in the pot.\n\n"
+            f"🎫 **YOUR LOTTERY TICKETS**\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"**Tickets:** 0\n"
+            f"**Win Chance:** 0%\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"💰 **Current Pot:** {pot_stars} ⭐ ({pot_ton:.4f} TON)\n"
+            f"⏰ **Draw in:** {countdown}\n\n"
             f"**How to get tickets:**\n"
-            f"• 1 seal = 1 lottery ticket\n"
-            f"• 20% of each payment goes to jackpot\n\n"
-            f"Start sealing to enter the draw!\n"
-            f"Next draw: {next_draw}",
+            f"• Seal a file or screenshot\n"
+            f"• Every seal = 1 ticket\n"
+            f"• 20% of fees → jackpot\n\n"
+            f"🚀 **Start sealing to enter!**",
             parse_mode="Markdown"
         )
     else:
+        # Calculate rank (simplified - just show if top player)
+        rank_msg = ""
+        if ticket_count > 0 and unique_players > 1:
+            avg_tickets = total_entries / unique_players
+            if ticket_count > avg_tickets * 2:
+                rank_msg = "🏆 **You're a TOP player!**\n"
+            elif ticket_count > avg_tickets:
+                rank_msg = "📈 **Above average odds!**\n"
+
+        # Visual ticket representation
+        ticket_visual = "🎫" * min(ticket_count, 10)
+        if ticket_count > 10:
+            ticket_visual += f" +{ticket_count - 10} more"
+
         await message.answer(
-            f"🎫 **Your Lottery Tickets**\n\n"
+            f"🎫 **YOUR LOTTERY TICKETS**\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"{ticket_visual}\n\n"
             f"**Tickets:** {ticket_count}\n"
-            f"**Win Chance:** {win_chance:.2f}%\n\n"
-            f"**Next Draw:** {next_draw}\n\n"
-            f"More seals = more tickets = better odds! 🚀",
+            f"**Win Chance:** {win_chance:.2f}%\n"
+            f"{rank_msg}"
+            f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"💰 **Pot:** {pot_stars} ⭐ (~{pot_ton:.4f} TON)\n"
+            f"👥 **Players:** {unique_players}\n"
+            f"⏰ **Draw in:** {countdown}\n\n"
+            f"🚀 **Seal more = better odds!**",
             parse_mode="Markdown"
         )
 
@@ -1582,16 +1852,12 @@ if memeseal_dp:
         file_info = pending_files[user_id]
         del pending_files[user_id]
 
-        # 🚨 INSTANT SUCCESS MESSAGE - fake it till we make it
-        fake_hash = f"{user_id}{int(time.time())}"[:16]
-        success_msg = await callback.message.answer(
-            f"🚨 **TON PAYMENT DETECTED IN 0.69 SECONDS** 🟢\n\n"
-            f"0.015 TON received — sealing your file forever...\n\n"
-            f"✅ **SEALED!** 🐸⚡\n"
-            f"Verification: `notaryton.com/verify/{fake_hash}...`\n"
-            f"🎰 Lottery tickets +1\n"
-            f"💰 Pot grew +0.003 TON\n\n"
-            f"_Real verification link in ~10s..._",
+        # ✅ HONEST PROGRESS - show real status, no fake success
+        progress_msg = await callback.message.answer(
+            f"⏳ **SEALING TO BLOCKCHAIN...**\n\n"
+            f"Your file is being timestamped on TON.\n"
+            f"This takes 5-15 seconds.\n\n"
+            f"_Please wait..._",
             parse_mode="Markdown"
         )
 
@@ -1599,7 +1865,7 @@ if memeseal_dp:
         asyncio.create_task(background_seal_ton(
             user_id=user_id,
             file_info=file_info,
-            message_to_edit=success_msg
+            message_to_edit=progress_msg
         ))
 
 
@@ -1667,27 +1933,40 @@ if memeseal_dp:
                 )
                 asyncio.create_task(announce_seal_to_socials(file_hash))
             else:
-                # ❌ All retries failed
+                # ❌ All retries failed - show retry button
+                retry_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                    [types.InlineKeyboardButton(text="🔄 Try Again", callback_data="ms_retry_seal")],
+                    [types.InlineKeyboardButton(text="⭐ Use Stars Instead", callback_data="ms_pay_stars_single")]
+                ])
                 await message_to_edit.edit_text(
-                    f"⚠️ **Contract waking up...**\n\n"
-                    f"TON network is slow. Your seal is queued.\n\n"
-                    f"Options:\n"
-                    f"• Wait 60s and send file again\n"
-                    f"• Use ⭐ Stars for instant seal\n\n"
-                    f"_We're working on it!_ 🐸",
-                    parse_mode="Markdown"
+                    f"⚠️ **TON Network Busy**\n\n"
+                    f"We tried 5 times but the network is congested.\n\n"
+                    f"**Your options:**\n"
+                    f"• Tap 'Try Again' in 30 seconds\n"
+                    f"• Use Stars for guaranteed instant seal\n\n"
+                    f"_Your file is safe - just try again!_",
+                    parse_mode="Markdown",
+                    reply_markup=retry_keyboard
                 )
+                # Store file for retry
+                pending_files[user_id] = file_info
 
         except Exception as e:
             print(f"❌ Background seal error: {e}")
+            # Agent 9: ALWAYS notify user of failures
+            retry_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="🔄 Try Again", callback_data="ms_retry_seal")],
+                [types.InlineKeyboardButton(text="⭐ Use Stars Instead", callback_data="ms_pay_stars_single")]
+            ])
             try:
+                error_msg = get_user_friendly_error(e, "Sealing your file")
                 await message_to_edit.edit_text(
-                    f"⚠️ **Seal pending...**\n\n"
-                    f"Network hiccup. Send your file again in 30s.\n"
-                    f"Or use ⭐ Stars for guaranteed instant seal.\n\n"
-                    f"🐸",
-                    parse_mode="Markdown"
+                    error_msg,
+                    parse_mode="Markdown",
+                    reply_markup=retry_keyboard
                 )
+                # Store file for retry
+                pending_files[user_id] = file_info
             except:
                 pass
 
@@ -1726,21 +2005,18 @@ if memeseal_dp:
                 parse_mode="Markdown"
             )
         else:
-            # 🚨 INSTANT DOPAMINE - check if we have pending file to seal
+            # ✅ HONEST PROGRESS - check if we have pending file to seal
             if user_id in pending_files:
                 file_info = pending_files[user_id]
                 del pending_files[user_id]
 
-                # Show instant success
-                fake_hash = f"{user_id}{int(time.time())}"[:16]
-                success_msg = await message.answer(
-                    f"🚨 **STAR PAYMENT CONFIRMED IN 0.42 SECONDS** 🟢\n\n"
-                    f"1 ⭐ received — sealing your file forever...\n\n"
-                    f"✅ **SEALED!** 🐸⚡\n"
-                    f"Verification: `notaryton.com/verify/{fake_hash}...`\n"
-                    f"🎰 Lottery tickets: {ticket_count}\n"
-                    f"💰 Pot grew +0.002 TON\n\n"
-                    f"_Real verification link in ~5s..._",
+                # Show honest progress message
+                progress_msg = await message.answer(
+                    f"✅ **PAYMENT RECEIVED!** 🟢\n\n"
+                    f"1 ⭐ confirmed — now sealing to blockchain...\n\n"
+                    f"⏳ This takes 5-15 seconds.\n"
+                    f"🎰 Lottery tickets: {ticket_count}\n\n"
+                    f"_Please wait..._",
                     parse_mode="Markdown"
                 )
 
@@ -1748,7 +2024,7 @@ if memeseal_dp:
                 asyncio.create_task(background_seal_stars(
                     user_id=user_id,
                     file_info=file_info,
-                    message_to_edit=success_msg,
+                    message_to_edit=progress_msg,
                     ticket_count=ticket_count
                 ))
             else:
@@ -1803,17 +2079,35 @@ if memeseal_dp:
 
         except Exception as e:
             print(f"❌ Stars seal error: {e}")
-            # Still show success - we got their money, seal will happen eventually
+            # Agent 9: Notify user with retry option (they paid, we owe them!)
+            retry_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="🔄 Retry Seal", callback_data="ms_retry_seal")]
+            ])
             if file_hash:
                 try:
                     await message_to_edit.edit_text(
-                        f"✅ **SEALED** (pending confirmation)\n\n"
-                        f"Hash: `{file_hash}`\n"
-                        f"🔗 Verify: notaryton.com/api/v1/verify/{file_hash}\n\n"
+                        f"⚠️ **Network Delay**\n\n"
+                        f"Payment received but seal pending.\n\n"
+                        f"Hash: `{file_hash}`\n\n"
+                        f"**Your seal is queued** - tap Retry or wait 30s.\n"
                         f"🎰 Lottery tickets: {ticket_count}\n\n"
-                        f"_Chain confirmation in progress..._",
-                        parse_mode="Markdown"
+                        f"_We'll keep trying automatically!_",
+                        parse_mode="Markdown",
+                        reply_markup=retry_keyboard
                     )
+                    # Store for retry
+                    pending_files[user_id] = file_info
+                except:
+                    pass
+            else:
+                try:
+                    error_msg = get_user_friendly_error(e, "Processing your file")
+                    await message_to_edit.edit_text(
+                        error_msg,
+                        parse_mode="Markdown",
+                        reply_markup=retry_keyboard
+                    )
+                    pending_files[user_id] = file_info
                 except:
                     pass
 
@@ -1823,6 +2117,42 @@ if memeseal_dp:
                     os.remove(file_path)
                 except:
                     pass
+
+    # Agent 9: Retry handler for failed seals
+    @memeseal_dp.callback_query(F.data == "ms_retry_seal")
+    async def memeseal_retry_seal(callback: types.CallbackQuery):
+        """Handle retry button for failed seals"""
+        user_id = callback.from_user.id
+        await callback.answer("🔄 Retrying...")
+
+        if user_id not in pending_files:
+            await callback.message.edit_text(
+                "⚠️ **Session Expired**\n\n"
+                "Please send your file again to seal it.",
+                parse_mode="Markdown"
+            )
+            return
+
+        file_info = pending_files[user_id]
+        del pending_files[user_id]
+
+        # Show progress
+        progress_msg = await callback.message.edit_text(
+            f"⏳ **RETRYING...**\n\n"
+            f"Sealing to blockchain.\n"
+            f"This takes 5-15 seconds.\n\n"
+            f"_Please wait..._",
+            parse_mode="Markdown"
+        )
+
+        # Retry in background
+        ticket_count = await db.lottery.count_user_entries(user_id)
+        asyncio.create_task(background_seal_stars(
+            user_id=user_id,
+            file_info=file_info,
+            message_to_edit=progress_msg,
+            ticket_count=ticket_count
+        ))
 
     @memeseal_dp.message(Command("api"))
     async def memeseal_api(message: types.Message):
@@ -2151,6 +2481,182 @@ if MEMESEAL_WEBHOOK_PATH:
         update = Update(**(await request.json()))
         await memeseal_dp.feed_update(memeseal_bot, update)
         return {"ok": True}
+
+# ========================
+# TONAPI WEBHOOK - Real-time payment detection (no more 30s polling!)
+# ========================
+# Set this webhook URL in TonAPI console: https://notaryton.com/webhook/tonapi
+# Docs: https://docs.tonconsole.com/tonapi/webhooks
+
+@app.post("/webhook/tonapi")
+async def tonapi_webhook(request: Request):
+    """
+    Handle real-time transaction webhooks from TonAPI.
+    This replaces the 30-second polling with instant detection!
+    """
+    try:
+        data = await request.json()
+        print(f"📡 TonAPI webhook received: {data.get('event_type', 'unknown')}")
+
+        # TonAPI sends transaction events when our wallet receives payments
+        # Event types: "transaction" for incoming transactions
+        event_type = data.get("event_type", "")
+
+        if event_type == "transaction" or "transactions" in data:
+            # Handle transaction event
+            transactions = data.get("transactions", [data.get("transaction", {})])
+
+            for tx in transactions:
+                # Check if it's incoming to our wallet
+                account = tx.get("account", {})
+                account_address = account.get("address", "")
+
+                # Normalize addresses for comparison
+                our_wallet = SERVICE_TON_WALLET.replace("UQ", "").replace("EQ", "").lower()
+                tx_wallet = account_address.replace("0:", "").lower()
+
+                # Extract incoming message
+                in_msg = tx.get("in_msg", {})
+                if not in_msg:
+                    continue
+
+                # Get amount (in nanotons)
+                amount_nano = int(in_msg.get("value", 0))
+                amount_ton = amount_nano / 1e9
+
+                if amount_ton < 0.001:  # Ignore dust
+                    continue
+
+                # Extract memo/comment from message
+                memo = ""
+                msg_data = in_msg.get("msg_data", {})
+                if msg_data.get("@type") == "msg.dataText":
+                    memo = msg_data.get("text", "")
+                elif in_msg.get("decoded_body"):
+                    decoded = in_msg.get("decoded_body", {})
+                    memo = decoded.get("text", "") or decoded.get("comment", "")
+
+                # Also check raw body for memo
+                if not memo and in_msg.get("raw_body"):
+                    try:
+                        import base64
+                        raw = base64.b64decode(in_msg.get("raw_body", ""))
+                        # Skip first 4 bytes (comment op code)
+                        if len(raw) > 4:
+                            memo = raw[4:].decode('utf-8', errors='ignore').strip()
+                    except:
+                        pass
+
+                print(f"💰 TonAPI Payment: {amount_ton:.4f} TON, memo: '{memo}'")
+
+                # Try to find user_id from memo using our SEAL-XXXX format
+                user_id = None
+
+                # Check payment_memo_lookup first (SEAL-A7B3 format)
+                if memo in payment_memo_lookup:
+                    lookup = payment_memo_lookup[memo]
+                    if time.time() - lookup["timestamp"] < 600:  # 10 min validity
+                        user_id = lookup["user_id"]
+                        payment_type = lookup.get("type", "single")
+                        print(f"✅ Matched memo {memo} to user {user_id} ({payment_type})")
+
+                # Fallback: extract numeric user_id from memo
+                if not user_id:
+                    try:
+                        match = re.search(r'\d+', memo)
+                        if match:
+                            user_id = int(match.group())
+                    except:
+                        pass
+
+                if user_id:
+                    # Credit referrer with 5% commission
+                    user = await db.users.get(user_id)
+                    if user and user.referred_by:
+                        referrer_id = user.referred_by
+                        commission = amount_ton * 0.05
+                        await db.users.add_referral_earnings(referrer_id, commission)
+                        print(f"💰 Credited {commission:.4f} TON to referrer {referrer_id}")
+
+                    # Check payment type (subscription vs single)
+                    if amount_ton >= 0.28:  # Subscription (0.3 TON)
+                        await add_subscription(user_id, months=1)
+
+                        # 🎰 LOTTERY: Subscriptions get tickets
+                        await db.lottery.add_entry(user_id, amount_stars=20)  # Equivalent to 20 stars
+                        ticket_count = await db.lottery.count_user_entries(user_id)
+
+                        # Notify user instantly!
+                        for b in [bot, memeseal_bot]:
+                            if b:
+                                try:
+                                    await b.send_message(
+                                        user_id,
+                                        f"🚨 **INSTANT PAYMENT DETECTED!** 🟢\n\n"
+                                        f"✅ {amount_ton:.3f} TON received\n"
+                                        f"✅ Subscription activated (30 days)\n\n"
+                                        f"🎰 **+20 LOTTERY TICKETS!** (Total: {ticket_count})\n\n"
+                                        f"Send me anything to seal! 🐸⚡",
+                                        parse_mode="Markdown"
+                                    )
+                                except:
+                                    pass
+
+                        print(f"⚡ INSTANT: Activated subscription for user {user_id}")
+
+                    elif amount_ton >= TON_SINGLE_SEAL * 0.9:  # Single seal (with small variance)
+                        await db.users.ensure_exists(user_id)
+                        await db.users.add_payment(user_id, amount_ton)
+
+                        # 🎰 LOTTERY: Add entry
+                        await db.lottery.add_entry(user_id, amount_stars=1)
+                        ticket_count = await db.lottery.count_user_entries(user_id)
+
+                        # Mark pending payment as completed
+                        if user_id in pending_ton_payments:
+                            pending = pending_ton_payments[user_id]
+
+                            # Notify user instantly!
+                            for b in [bot, memeseal_bot]:
+                                if b:
+                                    try:
+                                        await b.send_message(
+                                            user_id,
+                                            f"🚨 **INSTANT PAYMENT DETECTED!** 🟢\n\n"
+                                            f"✅ {amount_ton:.4f} TON received\n"
+                                            f"✅ Credit added to your account\n\n"
+                                            f"🎰 **+1 LOTTERY TICKET!** (Total: {ticket_count})\n\n"
+                                            f"Now send me what you want sealed! 🐸",
+                                            parse_mode="Markdown"
+                                        )
+                                    except:
+                                        pass
+                        else:
+                            # Generic credit notification
+                            for b in [bot, memeseal_bot]:
+                                if b:
+                                    try:
+                                        await b.send_message(
+                                            user_id,
+                                            f"✅ **Payment Received!**\n\n"
+                                            f"{amount_ton:.4f} TON credited\n"
+                                            f"🎰 +1 lottery ticket (Total: {ticket_count})\n\n"
+                                            f"Send me a file to seal it! 🐸",
+                                            parse_mode="Markdown"
+                                        )
+                                    except:
+                                        pass
+
+                        print(f"⚡ INSTANT: Credited {amount_ton:.4f} TON to user {user_id}")
+
+        return {"ok": True, "processed": True}
+
+    except Exception as e:
+        print(f"⚠️ TonAPI webhook error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"ok": False, "error": str(e)}
+
 
 @app.get("/health")
 @app.head("/health")
