@@ -34,9 +34,13 @@ GROUP_IDS = os.getenv("GROUP_IDS", "").split(",")  # Comma-separated chat IDs
 DEPLOY_BOTS = ["@tondeployer", "@memelaunchbot", "@toncoinbot"]
 
 # Telegram Stars pricing (XTR currency)
-# 1 Star ≈ $0.013
+# 1 Star ≈ $0.02-0.05 depending on purchase method
 STARS_SINGLE_NOTARIZATION = 1   # 1 Star for single notarization
-STARS_MONTHLY_SUBSCRIPTION = 15  # 15 Stars for monthly unlimited (~$0.20)
+STARS_MONTHLY_SUBSCRIPTION = 20  # 20 Stars for monthly unlimited (~$1.00)
+
+# TON pricing
+TON_SINGLE_SEAL = 0.015  # 0.015 TON per seal (~$0.05)
+TON_MONTHLY_SUB = 0.3    # 0.3 TON for monthly unlimited (~$1.00)
 
 # Initialize bot and dispatcher (NotaryTON - professional)
 bot = Bot(token=BOT_TOKEN)
@@ -63,7 +67,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 TRANSLATIONS = {
     "en": {
         "welcome": "🔐 **NotaryTON** - Blockchain Notarization\n\nSeal contracts, files, and screenshots on TON forever.\n\n**Commands:**\n/notarize - Seal a contract\n/status - Check your subscription\n/subscribe - Get unlimited seals\n/referral - Earn 5% commission\n/withdraw - Withdraw referral earnings\n/lang - Change language",
-        "no_sub": "⚠️ **Payment Required**\n\n1 Star or 0.001 TON to seal this.",
+        "no_sub": "⚠️ **Payment Required**\n\n1 Star or 0.015 TON to seal this.",
         "sealed": "✅ **SEALED ON TON!**\n\nHash: `{hash}`\n\n🔗 Verify: {url}\n\nProof secured forever! 🔒",
         "withdraw_success": "✅ **Withdrawal Sent!**\n\n{amount} TON sent to your wallet.\nTX will appear in ~30 seconds.",
         "withdraw_min": "⚠️ Minimum withdrawal: 0.05 TON\n\nYour balance: {balance} TON",
@@ -77,7 +81,7 @@ TRANSLATIONS = {
     },
     "ru": {
         "welcome": "🔐 **NotaryTON** - Блокчейн Нотаризация\n\nПечать контрактов, файлов и скриншотов на TON навсегда.\n\n**Команды:**\n/notarize - Запечатать контракт\n/status - Проверить подписку\n/subscribe - Безлимит\n/referral - Заработай 5%\n/withdraw - Вывести заработок\n/lang - Сменить язык",
-        "no_sub": "⚠️ **Требуется оплата**\n\n1 Звезда или 0.001 TON для печати.",
+        "no_sub": "⚠️ **Требуется оплата**\n\n1 Звезда или 0.015 TON для печати.",
         "sealed": "✅ **ЗАПЕЧАТАНО НА TON!**\n\nХеш: `{hash}`\n\n🔗 Проверить: {url}\n\nДоказательство сохранено навсегда! 🔒",
         "withdraw_success": "✅ **Вывод отправлен!**\n\n{amount} TON отправлено на ваш кошелек.\nTX появится через ~30 секунд.",
         "withdraw_min": "⚠️ Минимальный вывод: 0.05 TON\n\nВаш баланс: {balance} TON",
@@ -91,7 +95,7 @@ TRANSLATIONS = {
     },
     "zh": {
         "welcome": "🔐 **NotaryTON** - 区块链公证\n\n在TON上永久封存合约、文件和截图。\n\n**命令:**\n/notarize - 封存合约\n/status - 查看订阅\n/subscribe - 无限封存\n/referral - 赚取5%佣金\n/withdraw - 提取收益\n/lang - 更改语言",
-        "no_sub": "⚠️ **需要付款**\n\n1星或0.001 TON来封存。",
+        "no_sub": "⚠️ **需要付款**\n\n1星或0.015 TON来封存。",
         "sealed": "✅ **已封存到TON!**\n\n哈希: `{hash}`\n\n🔗 验证: {url}\n\n证明已永久保存! 🔒",
         "withdraw_success": "✅ **提款已发送!**\n\n{amount} TON已发送到您的钱包。\n交易将在~30秒后显示。",
         "withdraw_min": "⚠️ 最低提款: 0.05 TON\n\n您的余额: {balance} TON",
@@ -223,7 +227,7 @@ async def get_contract_code_from_tx(tx_id: str) -> bytes:
         if client:
             await client.close_all()
 
-async def send_ton_transaction(comment: str, amount_ton: float = 0.001):
+async def send_ton_transaction(comment: str, amount_ton: float = 0.005):
     """Send TON transaction with comment (notarization proof)"""
     client = None
     try:
@@ -405,8 +409,8 @@ async def poll_wallet_for_payments():
                             await db.users.add_referral_earnings(referrer_id, commission)
                             print(f"💰 Credited {commission:.4f} TON to referrer {referrer_id}")
 
-                        # Check if it's a subscription payment (0.1 TON)
-                        if amount_ton >= 0.095:  # Allow small variance
+                        # Check if it's a subscription payment (0.3 TON)
+                        if amount_ton >= 0.28:  # Allow small variance
                             await add_subscription(user_id, months=1)
                             print(f"✅ Activated subscription for user {user_id}")
 
@@ -425,8 +429,8 @@ async def poll_wallet_for_payments():
                                     except Exception:
                                         pass
 
-                        # Check if it's a single notarization payment (0.001 TON)
-                        elif amount_ton >= 0.0009:  # Allow small variance
+                        # Check if it's a single notarization payment (0.015 TON)
+                        elif amount_ton >= 0.014:  # Allow small variance
                             # Add to database as paid credit
                             await db.users.ensure_exists(user_id)
                             await db.users.add_payment(user_id, amount_ton)
@@ -537,7 +541,7 @@ async def cmd_start(message: types.Message):
         "• /status - Your stats\n"
         "• /notarize - Seal a file\n"
         "• /referral - Earn 5%\n\n"
-        "💰 ⭐ 1 Star per seal | 15 Stars/mo unlimited"
+        "💰 ⭐ 1 Star per seal | 20 Stars/mo unlimited"
     )
     
     await message.answer(welcome_msg, parse_mode="Markdown")
@@ -548,16 +552,16 @@ async def cmd_subscribe(message: types.Message):
 
     # Create inline keyboard with payment options
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="⭐ Pay with Stars (15 Stars)", callback_data="pay_stars_sub")],
-        [types.InlineKeyboardButton(text="💎 Pay with TON (0.1 TON)", callback_data="pay_ton_sub")]
+        [types.InlineKeyboardButton(text="⭐ Pay with Stars (20 Stars)", callback_data="pay_stars_sub")],
+        [types.InlineKeyboardButton(text="💎 Pay with TON (0.3 TON)", callback_data="pay_ton_sub")]
     ])
 
     await message.answer(
         f"💎 **Unlimited Monthly Subscription**\n\n"
         f"**Benefits:** Unlimited notarizations for 30 days\n\n"
         f"**Choose Payment Method:**\n"
-        f"⭐ **Telegram Stars:** 15 Stars (~$0.20)\n"
-        f"💎 **TON:** 0.1 TON (~$0.18)\n\n"
+        f"⭐ **Telegram Stars:** 20 Stars (~$1.00)\n"
+        f"💎 **TON:** 0.3 TON (~$1.00)\n\n"
         f"Tap a button below to pay:",
         parse_mode="Markdown",
         reply_markup=keyboard
@@ -589,7 +593,7 @@ async def process_ton_subscription(callback: types.CallbackQuery):
 
     await callback.message.answer(
         f"💎 **Pay with TON**\n\n"
-        f"Send **0.1 TON** to:\n"
+        f"Send **0.3 TON** to:\n"
         f"`{SERVICE_TON_WALLET}`\n\n"
         f"**IMPORTANT:** Include this memo:\n"
         f"`{user_id}`\n\n"
@@ -623,7 +627,7 @@ async def process_ton_single(callback: types.CallbackQuery):
 
     await callback.message.answer(
         f"💎 **Pay with TON**\n\n"
-        f"Send **0.001 TON** to:\n"
+        f"Send **0.015 TON** to:\n"
         f"`{SERVICE_TON_WALLET}`\n\n"
         f"**IMPORTANT:** Include this memo:\n"
         f"`{user_id}`\n\n"
@@ -750,7 +754,7 @@ async def process_successful_payment(message: types.Message):
     elif payload.startswith("single_"):
         # Add single notarization credit
         await db.users.ensure_exists(user_id)
-        await db.users.add_payment(user_id, 0.001)
+        await db.users.add_payment(user_id, TON_SINGLE_SEAL)
 
         await message.answer(
             "✅ **Payment Received!**\n\n"
@@ -983,23 +987,23 @@ async def cmd_notarize(message: types.Message):
     has_credit = False
     if not has_sub:
         total_paid = await db.users.get_total_paid(user_id)
-        if total_paid >= 0.001:
+        if total_paid >= TON_SINGLE_SEAL:
             has_credit = True
 
     if not has_sub and not has_credit:
         # Offer payment options
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="⭐ Pay 1 Star", callback_data="pay_stars_single")],
-            [types.InlineKeyboardButton(text="💎 Pay 0.001 TON", callback_data="pay_ton_single")],
-            [types.InlineKeyboardButton(text="🚀 Unlimited (15 Stars/mo)", callback_data="pay_stars_sub")]
+            [types.InlineKeyboardButton(text="💎 Pay 0.015 TON", callback_data="pay_ton_single")],
+            [types.InlineKeyboardButton(text="🚀 Unlimited (20 Stars/mo)", callback_data="pay_stars_sub")]
         ])
 
         await message.answer(
             "⚠️ **Payment Required**\n\n"
             "Choose how to pay for this notarization:\n\n"
             "⭐ **1 Star** - Quick & easy\n"
-            "💎 **0.001 TON** - Native crypto\n"
-            "🚀 **15 Stars/mo** - Unlimited access\n",
+            "💎 **0.015 TON** - Native crypto\n"
+            "🚀 **20 Stars/mo** - Unlimited access\n",
             parse_mode="Markdown",
             reply_markup=keyboard
         )
@@ -1021,22 +1025,22 @@ async def check_user_can_notarize(user_id: int):
         return True, True
 
     total_paid = await db.users.get_total_paid(user_id)
-    if total_paid >= 0.001:
+    if total_paid >= TON_SINGLE_SEAL:
         return True, False
     return False, False
 
 
 async def deduct_credit(user_id: int):
     """Deduct one notarization credit from user"""
-    await db.users.deduct_payment(user_id, 0.001)
+    await db.users.deduct_payment(user_id, TON_SINGLE_SEAL)
 
 
 def get_payment_keyboard():
     """Return standard payment keyboard"""
     return types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="⭐ Pay 1 Star", callback_data="pay_stars_single")],
-        [types.InlineKeyboardButton(text="💎 Pay 0.001 TON", callback_data="pay_ton_single")],
-        [types.InlineKeyboardButton(text="🚀 Unlimited (15 Stars/mo)", callback_data="pay_stars_sub")]
+        [types.InlineKeyboardButton(text="💎 Pay 0.015 TON", callback_data="pay_ton_single")],
+        [types.InlineKeyboardButton(text="🚀 Unlimited (20 Stars/mo)", callback_data="pay_stars_sub")]
     ])
 
 
@@ -1113,7 +1117,7 @@ async def handle_text_message(message: types.Message):
             await message.reply(
                 f"🔍 **New Launch Detected!**\n\n"
                 f"Contract: `{contract_id[:20]}...`\n\n"
-                f"⚠️ Send 0.001 TON to `{SERVICE_TON_WALLET}` (memo: `{user_id}`) to notarize!\n"
+                f"⚠️ Send 0.015 TON to `{SERVICE_TON_WALLET}` (memo: `{user_id}`) to notarize!\n"
                 f"Or /subscribe for unlimited access.",
                 parse_mode="Markdown"
             )
@@ -1142,7 +1146,7 @@ async def handle_text_message(message: types.Message):
 
         contract_hash = hash_data(contract_code)
         comment = f"NotaryTON:Contract:{contract_hash[:16]}"
-        await send_ton_transaction(comment, amount_ton=0.001)
+        await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
         await log_notarization(user_id, contract_id, contract_hash, paid=True)
 
         # Deduct credit if not subscription
@@ -1171,8 +1175,8 @@ async def handle_document(message: types.Message):
             "⚠️ **Payment Required to Notarize**\n\n"
             "Choose how to pay:\n\n"
             "⭐ **1 Star** - Quick & easy\n"
-            "💎 **0.001 TON** - Native crypto\n"
-            "🚀 **15 Stars/mo** - Unlimited access\n",
+            "💎 **0.015 TON** - Native crypto\n"
+            "🚀 **20 Stars/mo** - Unlimited access\n",
             parse_mode="Markdown",
             reply_markup=get_payment_keyboard()
         )
@@ -1284,7 +1288,7 @@ if memeseal_dp:
         # Check for CHIMPWIN promo (first 500 free seals)
         free_seal_msg = ""
         if promo_code == "CHIMPWIN":
-            await db.users.add_payment(user_id, 0.001)
+            await db.users.add_payment(user_id, TON_SINGLE_SEAL)
             free_seal_msg = "\n\n🎁 **PROMO ACTIVATED!** You got 1 free seal. LFG!"
 
         welcome_msg = (
@@ -1319,8 +1323,8 @@ if memeseal_dp:
         user_id = message.from_user.id
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="⭐ 15 Stars - Go Unlimited", callback_data="ms_pay_stars_sub")],
-            [types.InlineKeyboardButton(text="💎 0.1 TON - Same thing", callback_data="ms_pay_ton_sub")]
+            [types.InlineKeyboardButton(text="⭐ 20 Stars - Go Unlimited", callback_data="ms_pay_stars_sub")],
+            [types.InlineKeyboardButton(text="💎 0.3 TON - Same thing", callback_data="ms_pay_ton_sub")]
         ])
 
         await message.answer(
@@ -1331,7 +1335,7 @@ if memeseal_dp:
             "• API access included\n"
             "• Batch operations\n"
             "• Priority support (lol jk we respond to everyone)\n\n"
-            "**Price:** 15 Stars OR 0.1 TON\n\n"
+            "**Price:** 20 Stars OR 0.3 TON\n\n"
             "That's like... 2 failed txs on Solana.\n"
             "Except this one actually works. 🐸",
             parse_mode="Markdown",
@@ -1357,7 +1361,7 @@ if memeseal_dp:
         await callback.answer()
         await callback.message.answer(
             f"💎 **Pay with TON**\n\n"
-            f"Send **0.1 TON** to:\n"
+            f"Send **0.3 TON** to:\n"
             f"`{SERVICE_TON_WALLET}`\n\n"
             f"**Memo:** `{user_id}`\n\n"
             f"Auto-activates in ~1 min. Then go seal everything. 🐸",
@@ -1383,7 +1387,7 @@ if memeseal_dp:
         await callback.answer()
         await callback.message.answer(
             f"💎 **Pay with TON**\n\n"
-            f"Send **0.001 TON** to:\n"
+            f"Send **0.015 TON** to:\n"
             f"`{SERVICE_TON_WALLET}`\n\n"
             f"**Memo:** `{user_id}`\n\n"
             f"Then send your file again. We'll seal it. 🐸",
@@ -1412,7 +1416,7 @@ if memeseal_dp:
             )
         else:
             await db.users.ensure_exists(user_id)
-            await db.users.add_payment(user_id, 0.001)
+            await db.users.add_payment(user_id, TON_SINGLE_SEAL)
             await message.answer(
                 "✅ **PAID**\n\n"
                 "Now send me what you want sealed.\n"
@@ -1458,13 +1462,13 @@ if memeseal_dp:
         has_credit = False
         if not has_sub:
             total_paid = await db.users.get_total_paid(user_id)
-            if total_paid >= 0.001:
+            if total_paid >= TON_SINGLE_SEAL:
                 has_credit = True
 
         if not has_sub and not has_credit:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [types.InlineKeyboardButton(text="⭐ Pay 1 Star & Seal Now", callback_data="ms_pay_stars_single")],
-                [types.InlineKeyboardButton(text="💎 Pay 0.001 TON instead", callback_data="ms_pay_ton_single")],
+                [types.InlineKeyboardButton(text="💎 Pay 0.015 TON instead", callback_data="ms_pay_ton_single")],
                 [types.InlineKeyboardButton(text="🚀 Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
             ])
             await message.answer(
@@ -1492,7 +1496,7 @@ if memeseal_dp:
             await log_notarization(user_id, "memeseal_file", file_hash, paid=True)
 
             if not has_sub:
-                await db.users.deduct_payment(user_id, 0.001)
+                await db.users.deduct_payment(user_id, TON_SINGLE_SEAL)
 
             await message.answer(
                 f"⚡ **SEALED** ⚡\n\n"
@@ -1519,13 +1523,13 @@ if memeseal_dp:
         has_credit = False
         if not has_sub:
             total_paid = await db.users.get_total_paid(user_id)
-            if total_paid >= 0.001:
+            if total_paid >= TON_SINGLE_SEAL:
                 has_credit = True
 
         if not has_sub and not has_credit:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [types.InlineKeyboardButton(text="⭐ Pay 1 Star & Seal Now", callback_data="ms_pay_stars_single")],
-                [types.InlineKeyboardButton(text="💎 Pay 0.001 TON instead", callback_data="ms_pay_ton_single")],
+                [types.InlineKeyboardButton(text="💎 Pay 0.015 TON instead", callback_data="ms_pay_ton_single")],
                 [types.InlineKeyboardButton(text="🚀 Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
             ])
             await message.answer(
@@ -1553,7 +1557,7 @@ if memeseal_dp:
             await log_notarization(user_id, "memeseal_photo", file_hash, paid=True)
 
             if not has_sub:
-                await db.users.deduct_payment(user_id, 0.001)
+                await db.users.deduct_payment(user_id, TON_SINGLE_SEAL)
 
             await message.answer(
                 f"⚡ **SCREENSHOT SEALED** ⚡\n\n"
@@ -1866,13 +1870,13 @@ async def landing_page_memeseal():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MemeSeal TON ⚡🐸 - Proof or it didn't happen</title>
-    <meta name="description" content="Seal your bags before the rug. Instant on-chain proof on TON. 1 Star or 0.001 TON per seal.">
+    <meta name="description" content="Seal your bags before the rug. Instant on-chain proof on TON. 1 Star or 0.015 TON per seal.">
 
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://notaryton.com/">
     <meta property="og:title" content="MemeSeal TON ⚡🐸 - Proof or it didn't happen">
-    <meta property="og:description" content="Seal your bags before the rug. Instant on-chain proof on TON. 1 Star or 0.001 TON per seal.">
+    <meta property="og:description" content="Seal your bags before the rug. Instant on-chain proof on TON. 1 Star or 0.015 TON per seal.">
     <meta property="og:image" content="https://notaryton.com/static/memeseal_banner.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
@@ -2121,7 +2125,7 @@ async def landing_page_memeseal():
         <p class="tagline">Seal your bags before the rug.</p>
         <p class="subtagline">One tap = on-chain proof you were early. No more "bro trust me" screenshots.</p>
         <a href="https://t.me/{MEMESEAL_USERNAME}" class="cta">START SEALING</a>
-        <span class="badge">🔥 Costs less than a failed tx → 0.001 TON</span>
+        <span class="badge">🔥 Cheaper than gas on ETH → 0.015 TON</span>
     </div>
 
     <div class="features">
@@ -2150,7 +2154,7 @@ async def landing_page_memeseal():
             <div class="price-card">
                 <h3>Pay As You Go</h3>
                 <div class="price">1 ⭐ STAR</div>
-                <div class="price-alt">or 0.001 TON (~$0.05)</div>
+                <div class="price-alt">or 0.015 TON (~$0.05)</div>
                 <ul>
                     <li>Single seal</li>
                     <li>Instant on-chain proof</li>
@@ -2160,8 +2164,8 @@ async def landing_page_memeseal():
             </div>
             <div class="price-card featured">
                 <h3>Unlimited Monthly</h3>
-                <div class="price">15 ⭐ STARS</div>
-                <div class="price-alt">or 0.1 TON (~$0.50)</div>
+                <div class="price">20 ⭐ STARS</div>
+                <div class="price-alt">or 0.3 TON (~$1.00)</div>
                 <ul>
                     <li>Unlimited seals</li>
                     <li>API access included</li>
@@ -2211,13 +2215,13 @@ async def landing_page_legacy():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NotaryTON - Blockchain Notarization on TON</title>
-    <meta name="description" content="Seal any file on TON blockchain. Instant. Immutable. Forever. Starting at 1 Star or 0.001 TON.">
+    <meta name="description" content="Seal any file on TON blockchain. Instant. Immutable. Forever. Starting at 1 Star or 0.015 TON.">
 
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://notaryton.com/">
     <meta property="og:title" content="NotaryTON - Blockchain Notarization on TON">
-    <meta property="og:description" content="Seal any file on TON blockchain. Instant. Immutable. Forever. Starting at 1 Star or 0.001 TON.">
+    <meta property="og:description" content="Seal any file on TON blockchain. Instant. Immutable. Forever. Starting at 1 Star or 0.015 TON.">
     <meta property="og:image" content="https://notaryton.com/static/logo.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
@@ -2436,7 +2440,7 @@ async def landing_page_legacy():
         <div class="price-cards">
             <div class="price-card">
                 <h3>Pay As You Go</h3>
-                <div class="price">1 Star <small>or 0.001 TON</small></div>
+                <div class="price">1 Star <small>or 0.015 TON</small></div>
                 <ul>
                     <li>Single notarization</li>
                     <li>Instant on-chain proof</li>
@@ -2446,7 +2450,7 @@ async def landing_page_legacy():
             </div>
             <div class="price-card" style="border-color: #0a4d8c;">
                 <h3>Monthly Unlimited</h3>
-                <div class="price">15 Stars <small>or 0.1 TON</small></div>
+                <div class="price">20 Stars <small>or 0.3 TON</small></div>
                 <ul>
                     <li>Unlimited notarizations</li>
                     <li>API access included</li>
@@ -2522,7 +2526,7 @@ async def api_notarize(request: Request):
         if metadata.get("project_name"):
             comment = f"NotaryTON:{metadata['project_name'][:20]}:{contract_hash[:12]}"
         
-        await send_ton_transaction(comment, amount_ton=0.001)
+        await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
         await log_notarization(user_id, contract_id, contract_hash, paid=True)
         
         return {
@@ -2611,7 +2615,7 @@ async def api_batch_notarize(request: Request):
                 contract_hash = hash_data(contract_code)
                 
                 comment = f"NotaryTON:{name[:20]}:{contract_hash[:12]}" if name else f"NotaryTON:Batch:{contract_hash[:16]}"
-                await send_ton_transaction(comment, amount_ton=0.001)
+                await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
                 await log_notarization(user_id, address, contract_hash, paid=True)
                 
                 results.append({
