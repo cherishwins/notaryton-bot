@@ -2203,7 +2203,8 @@ async def whitepaper():
         <h2 style="text-align: center; color: #ff006e;">Let's fucking win. ⚡</h2>
 
         <div class="footer">
-            <p><a href="/">← Back to MemeSeal</a></p>
+            <p><a href="/static/whitepaper.pdf" target="_blank" style="background: #00ff88; color: #000; padding: 12px 30px; border-radius: 30px; text-decoration: none; font-weight: bold;">⬇️ Download PDF</a></p>
+            <p style="margin-top: 25px;"><a href="/">← Back to MemeSeal</a></p>
             <p style="margin-top: 20px;">© 2025 MemeSeal TON</p>
         </div>
     </div>
@@ -2910,7 +2911,7 @@ POST /api/v1/notarize<br>
             <a href="https://t.me/{MEMESEAL_USERNAME}">🤖 Bot</a>
             <a href="https://t.me/MemeSealTON">📢 Channel</a>
             <a href="https://x.com/MemeSealTON">𝕏 Twitter</a>
-            <a href="/whitepaper">📄 Whitepaper</a>
+            <a href="/static/whitepaper.pdf" target="_blank">📄 Whitepaper</a>
         </div>
 
         <p style="margin-top: 20px;">
