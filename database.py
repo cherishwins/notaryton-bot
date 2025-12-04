@@ -90,6 +90,16 @@ class BotState:
     value: str
 
 
+@dataclass
+class LotteryEntry:
+    id: Optional[int] = None
+    user_id: int = 0
+    amount_stars: int = 0  # Stars paid that generated this entry
+    created_at: Optional[datetime] = None
+    draw_id: Optional[int] = None  # Which draw this entry is for (null = current)
+    won: bool = False
+
+
 # ========================
 # REPOSITORY CLASSES
 # ========================
@@ -416,6 +426,117 @@ class BotStateRepository:
         """Delete state key"""
         async with self._pool.acquire() as conn:
             await conn.execute("DELETE FROM bot_state WHERE key = $1", key)
+
+
+class LotteryRepository:
+    """Repository for lottery operations - DEGEN MODE 🎰"""
+
+    def __init__(self, pool: Pool):
+        self._pool = pool
+
+    async def add_entry(self, user_id: int, amount_stars: int = 1) -> LotteryEntry:
+        """Add lottery entry for user (20% of each seal payment)"""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO lottery_entries (user_id, amount_stars)
+                VALUES ($1, $2)
+                RETURNING *
+            """, user_id, amount_stars)
+            return LotteryEntry(**dict(row))
+
+    async def get_user_entries(self, user_id: int, current_only: bool = True) -> List[LotteryEntry]:
+        """Get user's lottery entries"""
+        async with self._pool.acquire() as conn:
+            if current_only:
+                rows = await conn.fetch("""
+                    SELECT * FROM lottery_entries
+                    WHERE user_id = $1 AND draw_id IS NULL
+                    ORDER BY created_at DESC
+                """, user_id)
+            else:
+                rows = await conn.fetch("""
+                    SELECT * FROM lottery_entries
+                    WHERE user_id = $1
+                    ORDER BY created_at DESC
+                """, user_id)
+            return [LotteryEntry(**dict(row)) for row in rows]
+
+    async def count_user_entries(self, user_id: int, current_only: bool = True) -> int:
+        """Count user's lottery entries for current draw"""
+        async with self._pool.acquire() as conn:
+            if current_only:
+                row = await conn.fetchrow("""
+                    SELECT COUNT(*) as count FROM lottery_entries
+                    WHERE user_id = $1 AND draw_id IS NULL
+                """, user_id)
+            else:
+                row = await conn.fetchrow("""
+                    SELECT COUNT(*) as count FROM lottery_entries
+                    WHERE user_id = $1
+                """, user_id)
+            return row['count'] if row else 0
+
+    async def get_total_entries(self, current_only: bool = True) -> int:
+        """Get total entries in current lottery"""
+        async with self._pool.acquire() as conn:
+            if current_only:
+                row = await conn.fetchrow("""
+                    SELECT COUNT(*) as count FROM lottery_entries
+                    WHERE draw_id IS NULL
+                """)
+            else:
+                row = await conn.fetchrow("SELECT COUNT(*) as count FROM lottery_entries")
+            return row['count'] if row else 0
+
+    async def get_pot_size_stars(self) -> int:
+        """Get current pot size in Stars (20% of all entries)"""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT COALESCE(SUM(amount_stars), 0) as total FROM lottery_entries
+                WHERE draw_id IS NULL
+            """)
+            # 20% of each star payment goes to pot
+            total_stars = row['total'] if row else 0
+            return int(total_stars * 0.2)
+
+    async def get_pot_size_ton(self) -> float:
+        """Get pot size converted to TON (rough estimate)"""
+        stars = await self.get_pot_size_stars()
+        # 1 Star ≈ 0.001 TON (rough conversion)
+        return stars * 0.001
+
+    async def get_unique_participants(self) -> int:
+        """Get number of unique participants in current draw"""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT COUNT(DISTINCT user_id) as count FROM lottery_entries
+                WHERE draw_id IS NULL
+            """)
+            return row['count'] if row else 0
+
+    async def pick_winner(self, draw_id: int) -> Optional[int]:
+        """Randomly pick a winner from current entries (weighted by entry count)"""
+        async with self._pool.acquire() as conn:
+            # Pick random entry
+            row = await conn.fetchrow("""
+                SELECT user_id FROM lottery_entries
+                WHERE draw_id IS NULL
+                ORDER BY RANDOM()
+                LIMIT 1
+            """)
+            if row:
+                # Mark all current entries with draw_id
+                await conn.execute("""
+                    UPDATE lottery_entries SET draw_id = $1 WHERE draw_id IS NULL
+                """, draw_id)
+                # Mark winner entry
+                await conn.execute("""
+                    UPDATE lottery_entries SET won = TRUE
+                    WHERE user_id = $1 AND draw_id = $2
+                    LIMIT 1
+                """, row['user_id'], draw_id)
+                return row['user_id']
+            return None
 
 
 class ApiKeyRepository:

@@ -1860,6 +1860,185 @@ async def memeseal_redirect():
     return RedirectResponse(url="/", status_code=301)
 
 
+@app.get("/whitepaper", response_class=HTMLResponse)
+async def whitepaper():
+    """FROGS FOREVER - The Vision"""
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FROGS FOREVER - MemeSeal Whitepaper</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Space Mono', monospace;
+            background: #0a0a0f;
+            color: #ccc;
+            line-height: 1.8;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #00ff88;
+            font-size: 2rem;
+            margin-bottom: 10px;
+            text-shadow: 0 0 20px #00ff88;
+        }
+        h2 {
+            color: #00ff88;
+            font-size: 1.3rem;
+            margin: 40px 0 20px;
+            border-bottom: 1px solid #00ff8844;
+            padding-bottom: 10px;
+        }
+        h3 {
+            color: #88ffbb;
+            font-size: 1.1rem;
+            margin: 25px 0 15px;
+        }
+        p {
+            margin-bottom: 15px;
+        }
+        .tagline {
+            color: #888;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+        }
+        ul, ol {
+            margin-left: 25px;
+            margin-bottom: 20px;
+        }
+        li {
+            margin-bottom: 10px;
+        }
+        strong {
+            color: #00ff88;
+        }
+        .highlight {
+            background: #00ff8822;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #00ff88;
+            margin: 20px 0;
+        }
+        a {
+            color: #00ff88;
+        }
+        .footer {
+            margin-top: 60px;
+            text-align: center;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MemeSeal TON ⚡🐸</h1>
+        <p class="tagline"><strong>Proof or it didn't happen. Gamble or it didn't matter.</strong></p>
+
+        <p>The on-chain notary that turns every screenshot, wallet flex, and political meltdown into a slot machine you actually want to feed.</p>
+
+        <h2>1. Vision</h2>
+        <p>MemeSeal is already stamping thousands of bags forever for 1 Star.</p>
+        <p>But that's the trojan frog.</p>
+
+        <div class="highlight">
+            <p>The real game: every seal, every meme coin launch, every headline becomes fuel for a weekly lottery where someone gets a giant check delivered by a guy in a Pepe turtle suit while Robert Barnes announces it live.</p>
+        </div>
+
+        <p>Politics, NBA finals, Oscars—whatever real-world events drive live odds, frog puppets roast the candidates in a 7-minute cartoon, holders win life-changing TON, rake funds the next moonshot.</p>
+        <p><strong>This isn't another meme coin. This is reality television you own—and sometimes the frog kisses you back.</strong></p>
+
+        <h2>2. Problem</h2>
+        <ul>
+            <li>36,000 meme coins launch daily and die in 12 days because retention = zero</li>
+            <li>Prediction markets are for boomers with Excel</li>
+            <li>Telegram casinos feel like 2018 exit liquidity scams—no recurring dopamine, no reason to wake up</li>
+            <li>Real gamblers (BC Lotto cards, Vegas whales, DraftKings addicts) stare at "TON" and think it's sushi</li>
+        </ul>
+        <p><strong>Nobody is giving them micro-hits every five minutes while the world burns.</strong></p>
+
+        <h2>3. Solution – The Slot Machine Flywheel</h2>
+
+        <h3>Phase 1 – LIVE RIGHT NOW</h3>
+        <p>Send file/screenshot → pay 1 Star (~$0.02) → permanent TON hash + verification link</p>
+        <p>Used for bags, launches, receipts, GTFO screenshots, everything.</p>
+
+        <h3>Phase 2 – Post-grant (30-60 days)</h3>
+        <ul>
+            <li>Every single seal auto-enters the weekly lottery pool</li>
+            <li>We mint event coins: $FROGTRUMP, $KAMALATOAD, $SUPERBOWLPEPE</li>
+            <li>Price tracks Polymarket/Kalshi odds via oracle in real time</li>
+            <li>5% rake on trades → 2% treasury, 3% burned forever</li>
+            <li>Weekly live cartoon show (7 min): turtle host + frog puppets roast the week's scandals</li>
+            <li>End of show → random wallet wins $5k–$250k+ in TON + physical giant check + Barnes calls them on stream</li>
+        </ul>
+
+        <h3>Phase 3 – Casino Mini-App</h3>
+        <ul>
+            <li>Slots, roulette, crash—but the symbols are the politicians you're already betting on</li>
+            <li>Pay with Stars (credit card, zero KYC) or Bitcoin via Moonpay embed</li>
+            <li>One ecosystem. One growing jackpot. One cult.</li>
+        </ul>
+
+        <h2>4. Tokenomics</h2>
+        <p><strong>Fair launch, no presale, no VC bags:</strong></p>
+        <ul>
+            <li>Total supply: 1 billion $SEAL</li>
+            <li>50% lottery + burn vault</li>
+            <li>20% liquidity</li>
+            <li>15% treasury (dev + marketing + turtle costumes)</li>
+            <li>10% airdrops to early sealers</li>
+            <li>5% Robert Barnes "Free Speech Defense Fund"</li>
+        </ul>
+        <p>Every transaction takes 2-5% rake → buys back $SEAL → half burned, half to lottery.</p>
+        <p><strong>Deflation + infinite jackpot = price up only + stay forever.</strong></p>
+
+        <h2>5. Roadmap</h2>
+        <ul>
+            <li><strong>Dec 2025</strong> → Grant submitted. Notary already printing.</li>
+            <li><strong>Jan 2026</strong> → Lottery engine live. First test coin: Super Bowl. Casino MVP.</li>
+            <li><strong>Feb 2026</strong> → Robert Barnes on-boarded. First political coins. Weekly cartoon show drops.</li>
+            <li><strong>Q2 2026</strong> → 400+ midterm frog coins. Full casino suite. 100k DAU.</li>
+            <li><strong>2027</strong> → Oscars frogs, Eurovision frogs, Olympic frogs. Physical checks delivered globally.</li>
+        </ul>
+
+        <h2>6. Why TON</h2>
+        <ul>
+            <li>Stars = credit card on-ramp, zero KYC, Apple/Google already did the dirty work</li>
+            <li>Telegram native = viral coefficient on steroids</li>
+            <li>Actually fast & cheap when Solana is choking</li>
+            <li>We will onboard tens of thousands of real-world gamblers who think Bitcoin is the only crypto</li>
+        </ul>
+        <p><strong>Expected impact: 50k+ new TON wallets in 90 days, all addicted to frogs.</strong></p>
+
+        <div class="highlight">
+            <p>We're not asking for a grant to "build in public."</p>
+            <p>We're asking for rocket fuel to turn the entire gambling world into frogs—and let the frogs pay us forever.</p>
+        </div>
+
+        <p>P.S. First lottery winner gets a real giant check signed by Robert Barnes and a 24k gold Pepe chain. We're not kidding.</p>
+
+        <h2 style="text-align: center; margin-top: 60px;">Frogs Forever. 🐸</h2>
+        <h2 style="text-align: center; color: #888;">Turtles Never Rug. 🐢</h2>
+        <h2 style="text-align: center; color: #ff006e;">Let's fucking win. ⚡</h2>
+
+        <div class="footer">
+            <p><a href="/">← Back to MemeSeal</a></p>
+            <p style="margin-top: 20px;">© 2025 MemeSeal TON</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
 @app.get("/", response_class=HTMLResponse)
 async def landing_page_memeseal():
     """MemeSeal TON - Main landing page - NUCLEAR VERSION"""
@@ -2013,6 +2192,26 @@ async def landing_page_memeseal():
             font-size: 0.85rem;
             margin-top: 10px;
             opacity: 0.9;
+        }}
+
+        /* LOTTERY SCENE */
+        .lottery-scene {{
+            padding: 40px 20px;
+            text-align: center;
+            background: linear-gradient(180deg, #0a0a0f 0%, #0d0d15 100%);
+        }}
+        .scene-img {{
+            max-width: 900px;
+            width: 100%;
+            border-radius: 20px;
+            box-shadow: 0 0 60px rgba(0,255,136,0.3);
+            border: 2px solid #00ff8844;
+        }}
+        .scene-caption {{
+            color: #888;
+            margin-top: 20px;
+            font-size: 1.1rem;
+            font-style: italic;
         }}
 
         /* FEATURES */
@@ -2188,6 +2387,19 @@ async def landing_page_memeseal():
             font-size: 2.5rem;
             margin-bottom: 15px;
         }}
+        .casino-card .card-img {{
+            width: 100%;
+            border-radius: 12px;
+            margin-bottom: 15px;
+        }}
+        .casino-hero-img {{
+            max-width: 900px;
+            width: 100%;
+            border-radius: 20px;
+            margin-bottom: 40px;
+            box-shadow: 0 0 60px rgba(255,0,110,0.4);
+            border: 2px solid #ff006e44;
+        }}
         .launch-date {{
             display: inline-block;
             background: linear-gradient(90deg, #ff006e, #8338ec);
@@ -2263,6 +2475,14 @@ async def landing_page_memeseal():
             color: #00ff88;
             margin-top: 15px;
             font-size: 0.85rem;
+        }}
+        .barnes-img {{
+            max-width: 300px;
+            width: 100%;
+            border-radius: 50%;
+            margin-bottom: 20px;
+            box-shadow: 0 0 40px rgba(0,255,136,0.3);
+            border: 3px solid #00ff8844;
         }}
 
         /* DEV SECTION */
@@ -2374,6 +2594,12 @@ async def landing_page_memeseal():
         </div>
     </div>
 
+    <!-- LOTTERY WIN SCENE -->
+    <div class="lottery-scene">
+        <img src="/static/lottery_win.png" alt="Frog Jackpot Winner" class="scene-img">
+        <p class="scene-caption">This could be you. $420,069 TON. Giant check. Turtle suit guy. Confetti.</p>
+    </div>
+
     <!-- FEATURES -->
     <div class="features">
         <div class="feature">
@@ -2431,6 +2657,8 @@ async def landing_page_memeseal():
         <h2>🎰 COMING NEXT: THE FROG CASINO YOU'LL NEVER LEAVE 🎰</h2>
         <p class="subtitle">Master Stampway's grand vision. The frog gambles. You win.</p>
 
+        <img src="/static/casino_interior.png" alt="Frog Casino Interior" class="casino-hero-img">
+
         <div class="casino-cards">
             <div class="casino-card">
                 <div class="emoji">📈</div>
@@ -2438,14 +2666,14 @@ async def landing_page_memeseal():
                 <p>$FROGTRUMP price tracks real election odds. $FROGWEATHER tracks tomorrow's temp. Rake feeds the pot. Bet on reality.</p>
             </div>
             <div class="casino-card">
+                <img src="/static/weekly_show.png" alt="Weekly Live Show" class="card-img">
+                <h3>Weekly Live Show</h3>
+                <p>Puppet frogs roast the news, then we draw the lottery winner on stream. Degen entertainment meets real money.</p>
+            </div>
+            <div class="casino-card">
                 <div class="emoji">🎰</div>
                 <h3>Politician Slots</h3>
                 <p>Slots where politicians are the reels. Trump hair = 100x wild. Biden stumble = free spin. Nancy = insider multiplier.</p>
-            </div>
-            <div class="casino-card">
-                <div class="emoji">🐸</div>
-                <h3>Weekly Live Show</h3>
-                <p>Puppet frogs roast the news, then we draw the lottery winner on stream. Degen entertainment meets real money.</p>
             </div>
         </div>
 
@@ -2476,9 +2704,10 @@ async def landing_page_memeseal():
 
     <!-- BARNES SECTION -->
     <div class="barnes-section">
+        <img src="/static/barnes_frog.png" alt="Robert Barnes Frog" class="barnes-img">
         <h3>⚖️ LEGAL GODFATHER INCOMING</h3>
         <p>Robert Barnes joining soon. Political event coins vetted by the man who bets on elections for fun. The lawyer the establishment fears.</p>
-        <p class="coming">🐸 Frog caricature reveal coming soon...</p>
+        <p class="coming">Gavel + lottery ticket + TON blockchain = inevitable</p>
     </div>
 
     <!-- DEV SECTION -->
