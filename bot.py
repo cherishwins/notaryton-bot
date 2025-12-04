@@ -1862,7 +1862,7 @@ async def memeseal_redirect():
 
 @app.get("/", response_class=HTMLResponse)
 async def landing_page_memeseal():
-    """MemeSeal TON - Main landing page"""
+    """MemeSeal TON - Main landing page - NUCLEAR VERSION"""
     return f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -1870,13 +1870,13 @@ async def landing_page_memeseal():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MemeSeal TON ⚡🐸 - Proof or it didn't happen</title>
-    <meta name="description" content="Seal your bags before the rug. Instant on-chain proof on TON. 1 Star or 0.015 TON per seal.">
+    <meta name="description" content="Seal your bags before the rug. Instant on-chain proof on TON. Every seal feeds the weekly lottery pot.">
 
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://notaryton.com/">
     <meta property="og:title" content="MemeSeal TON ⚡🐸 - Proof or it didn't happen">
-    <meta property="og:description" content="Seal your bags before the rug. Instant on-chain proof on TON. 1 Star or 0.015 TON per seal.">
+    <meta property="og:description" content="Seal your bags. Feed the lottery. Win big. On-chain proof on TON.">
     <meta property="og:image" content="https://notaryton.com/static/memeseal_banner.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
@@ -1886,7 +1886,7 @@ async def landing_page_memeseal():
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:url" content="https://notaryton.com/">
     <meta name="twitter:title" content="MemeSeal TON ⚡🐸 - Proof or it didn't happen">
-    <meta name="twitter:description" content="Seal your bags before the rug. Receipts or GTFO 🐸">
+    <meta name="twitter:description" content="Seal your bags. Feed the lottery. Win big. Receipts or GTFO 🐸">
     <meta name="twitter:image" content="https://notaryton.com/static/memeseal_banner.png">
 
     <!-- Favicon -->
@@ -1895,7 +1895,6 @@ async def landing_page_memeseal():
 
     <!-- Analytics -->
     <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
-    <!-- End Analytics -->
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap');
@@ -1907,6 +1906,8 @@ async def landing_page_memeseal():
             min-height: 100vh;
             overflow-x: hidden;
         }}
+
+        /* HERO */
         .hero {{
             display: flex;
             flex-direction: column;
@@ -1925,20 +1926,22 @@ async def landing_page_memeseal():
         }}
         h1 {{
             font-family: 'Press Start 2P', cursive;
-            font-size: 2rem;
+            font-size: 1.8rem;
             color: #00ff88;
             text-shadow: 0 0 20px #00ff88, 0 0 40px #00ff88;
             margin-bottom: 15px;
         }}
         .tagline {{
-            font-size: 1.3rem;
+            font-size: 1.4rem;
             color: #88ffbb;
             margin-bottom: 10px;
+            font-weight: bold;
         }}
         .subtagline {{
             font-size: 1rem;
             color: #666;
-            margin-bottom: 40px;
+            margin-bottom: 30px;
+            max-width: 500px;
         }}
         .cta {{
             display: inline-block;
@@ -1947,7 +1950,7 @@ async def landing_page_memeseal():
             padding: 20px 50px;
             border-radius: 50px;
             text-decoration: none;
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             font-weight: 700;
             font-family: 'Press Start 2P', cursive;
             transition: all 0.3s;
@@ -1959,6 +1962,60 @@ async def landing_page_memeseal():
             transform: scale(1.05);
             box-shadow: 0 0 50px rgba(0,255,136,0.8);
         }}
+        .badge {{
+            display: inline-block;
+            background: #00ff8822;
+            color: #00ff88;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            margin-top: 15px;
+            border: 1px solid #00ff8844;
+        }}
+
+        /* LOTTERY BANNER */
+        .lottery-banner {{
+            background: linear-gradient(90deg, #ff006e, #8338ec, #3a86ff, #ff006e);
+            background-size: 300% 100%;
+            animation: gradient-shift 3s ease infinite;
+            padding: 20px;
+            margin-top: 30px;
+            border-radius: 15px;
+            max-width: 700px;
+            width: 100%;
+            border: 2px solid #fff;
+            box-shadow: 0 0 40px rgba(255,0,110,0.5);
+        }}
+        @keyframes gradient-shift {{
+            0% {{ background-position: 0% 50%; }}
+            50% {{ background-position: 100% 50%; }}
+            100% {{ background-position: 0% 50%; }}
+        }}
+        .lottery-banner h3 {{
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.8rem;
+            color: #fff;
+            margin-bottom: 10px;
+            animation: flash 1s infinite;
+        }}
+        @keyframes flash {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.7; }}
+        }}
+        .lottery-banner .pot {{
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1.5rem;
+            color: #ffff00;
+            text-shadow: 0 0 20px #ffff00;
+        }}
+        .lottery-banner .sub {{
+            color: #fff;
+            font-size: 0.85rem;
+            margin-top: 10px;
+            opacity: 0.9;
+        }}
+
+        /* FEATURES */
         .features {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -1973,10 +2030,12 @@ async def landing_page_memeseal():
             padding: 30px;
             border-radius: 16px;
             text-align: left;
+            transition: all 0.3s;
         }}
         .feature:hover {{
             border-color: #00ff88;
             box-shadow: 0 0 30px rgba(0,255,136,0.2);
+            transform: translateY(-5px);
         }}
         .feature h3 {{
             font-size: 1.1rem;
@@ -1987,6 +2046,8 @@ async def landing_page_memeseal():
             color: #888;
             line-height: 1.6;
         }}
+
+        /* PRICING */
         .pricing {{
             padding: 60px 20px;
             text-align: center;
@@ -1994,13 +2055,14 @@ async def landing_page_memeseal():
         }}
         .pricing h2 {{
             font-family: 'Press Start 2P', cursive;
-            font-size: 1.3rem;
-            margin-bottom: 15px;
+            font-size: 1.1rem;
+            margin-bottom: 10px;
             color: #00ff88;
         }}
         .pricing-sub {{
             color: #666;
             margin-bottom: 40px;
+            font-size: 0.9rem;
         }}
         .price-cards {{
             display: flex;
@@ -2023,6 +2085,20 @@ async def landing_page_memeseal():
         .price-card.featured {{
             border-color: #00ff88;
             box-shadow: 0 0 40px rgba(0,255,136,0.3);
+            position: relative;
+        }}
+        .price-card.featured::before {{
+            content: "🔥 MOST POPULAR";
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #00ff88;
+            color: #000;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: bold;
         }}
         .price-card h3 {{
             font-size: 1.2rem;
@@ -2031,7 +2107,7 @@ async def landing_page_memeseal():
         }}
         .price-card .price {{
             font-family: 'Press Start 2P', cursive;
-            font-size: 1.5rem;
+            font-size: 1.4rem;
             color: #00ff88;
             margin-bottom: 10px;
         }}
@@ -2056,6 +2132,140 @@ async def landing_page_memeseal():
         .price-card li:last-child {{
             border-bottom: none;
         }}
+
+        /* CASINO SECTION */
+        .casino-section {{
+            padding: 80px 20px;
+            text-align: center;
+            background: linear-gradient(180deg, #0a0510 0%, #150520 50%, #0a0510 100%);
+            border-top: 2px solid #ff006e33;
+            border-bottom: 2px solid #ff006e33;
+        }}
+        .casino-section h2 {{
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1rem;
+            color: #ff006e;
+            margin-bottom: 10px;
+            text-shadow: 0 0 30px #ff006e;
+        }}
+        .casino-section .subtitle {{
+            color: #8338ec;
+            font-size: 1.1rem;
+            margin-bottom: 40px;
+        }}
+        .casino-cards {{
+            display: flex;
+            justify-content: center;
+            gap: 25px;
+            flex-wrap: wrap;
+            max-width: 1000px;
+            margin: 0 auto 40px;
+        }}
+        .casino-card {{
+            background: linear-gradient(180deg, #1a0a20 0%, #0d0510 100%);
+            border: 2px solid #8338ec44;
+            border-radius: 20px;
+            padding: 30px;
+            width: 300px;
+            transition: all 0.3s;
+        }}
+        .casino-card:hover {{
+            border-color: #ff006e;
+            box-shadow: 0 0 40px rgba(255,0,110,0.3);
+            transform: translateY(-5px);
+        }}
+        .casino-card h3 {{
+            font-size: 1.1rem;
+            color: #ff006e;
+            margin-bottom: 15px;
+        }}
+        .casino-card p {{
+            color: #999;
+            line-height: 1.6;
+            font-size: 0.9rem;
+        }}
+        .casino-card .emoji {{
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+        }}
+        .launch-date {{
+            display: inline-block;
+            background: linear-gradient(90deg, #ff006e, #8338ec);
+            color: #fff;
+            padding: 12px 30px;
+            border-radius: 30px;
+            font-weight: bold;
+            font-size: 0.9rem;
+            margin-top: 20px;
+        }}
+
+        /* TESTIMONIALS */
+        .testimonials {{
+            padding: 60px 20px;
+            background: #050508;
+            text-align: center;
+        }}
+        .testimonials h2 {{
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.9rem;
+            color: #00ff88;
+            margin-bottom: 30px;
+        }}
+        .testimonial-strip {{
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            max-width: 1000px;
+            margin: 0 auto;
+        }}
+        .testimonial {{
+            background: #0a0a0f;
+            border: 1px solid #222;
+            border-radius: 15px;
+            padding: 25px;
+            max-width: 320px;
+            text-align: left;
+        }}
+        .testimonial p {{
+            color: #888;
+            font-style: italic;
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }}
+        .testimonial .author {{
+            color: #00ff88;
+            font-size: 0.85rem;
+        }}
+        .testimonial .stars {{
+            color: #ffcc00;
+            margin-bottom: 10px;
+        }}
+
+        /* BARNES SECTION */
+        .barnes-section {{
+            padding: 50px 20px;
+            text-align: center;
+            background: linear-gradient(180deg, #0a0a0f 0%, #0a1010 100%);
+        }}
+        .barnes-section h3 {{
+            font-size: 1rem;
+            color: #666;
+            margin-bottom: 10px;
+        }}
+        .barnes-section p {{
+            color: #888;
+            max-width: 500px;
+            margin: 0 auto;
+            font-size: 0.9rem;
+        }}
+        .barnes-section .coming {{
+            color: #00ff88;
+            margin-top: 15px;
+            font-size: 0.85rem;
+        }}
+
+        /* DEV SECTION */
         .dev-section {{
             padding: 60px 20px;
             text-align: center;
@@ -2063,7 +2273,7 @@ async def landing_page_memeseal():
         }}
         .dev-section h2 {{
             font-family: 'Press Start 2P', cursive;
-            font-size: 1.1rem;
+            font-size: 1rem;
             color: #00ff88;
             margin-bottom: 20px;
         }}
@@ -2087,55 +2297,92 @@ async def landing_page_memeseal():
             color: #00ff88;
             font-size: 0.85rem;
         }}
+
+        /* FOOTER */
         footer {{
             background: #000;
             color: #444;
-            padding: 40px 20px;
+            padding: 50px 20px;
             text-align: center;
             border-top: 1px solid #111;
         }}
         footer a {{
             color: #00ff88;
             text-decoration: none;
+            transition: color 0.3s;
         }}
-        .badge {{
-            display: inline-block;
-            background: #00ff8822;
-            color: #00ff88;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            margin-top: 20px;
-            border: 1px solid #00ff8844;
+        footer a:hover {{
+            color: #88ffbb;
         }}
-        .glow-text {{
-            text-shadow: 0 0 10px currentColor;
+        .social-links {{
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 20px 0;
         }}
+        .social-links a {{
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #111;
+            padding: 10px 20px;
+            border-radius: 25px;
+            border: 1px solid #222;
+            transition: all 0.3s;
+        }}
+        .social-links a:hover {{
+            border-color: #00ff88;
+            background: #0a0a0f;
+        }}
+
+        /* ANIMATIONS */
         @keyframes pulse {{
             0%, 100% {{ opacity: 1; }}
             50% {{ opacity: 0.7; }}
         }}
         .pulse {{ animation: pulse 2s infinite; }}
+
+        /* MOBILE */
+        @media (max-width: 768px) {{
+            h1 {{ font-size: 1.3rem; }}
+            .tagline {{ font-size: 1.1rem; }}
+            .cta {{ padding: 15px 30px; font-size: 0.9rem; }}
+            .lottery-banner h3 {{ font-size: 0.7rem; }}
+            .lottery-banner .pot {{ font-size: 1.2rem; }}
+            .banner {{ border-radius: 10px; }}
+            .price-card {{ width: 100%; max-width: 350px; }}
+            .casino-card {{ width: 100%; max-width: 350px; }}
+            .testimonial {{ max-width: 100%; }}
+        }}
     </style>
 </head>
 <body>
+    <!-- HERO -->
     <div class="hero">
-        <img src="/static/memeseal_banner.png" alt="MemeSeal TON" class="banner">
+        <img src="/static/memeseal_banner.png" alt="MemeSeal TON - Master Stampway & The Frog" class="banner">
         <h1>MEMESEAL TON ⚡🐸</h1>
-        <p class="tagline">Seal your bags before the rug.</p>
-        <p class="subtagline">One tap = on-chain proof you were early. No more "bro trust me" screenshots.</p>
+        <p class="tagline">Proof or it didn't happen.</p>
+        <p class="subtagline">One tap = on-chain proof you were early. No more "bro trust me" screenshots. Every seal feeds the pot.</p>
         <a href="https://t.me/{MEMESEAL_USERNAME}" class="cta">START SEALING</a>
         <span class="badge">🔥 Cheaper than gas on ETH → 0.015 TON</span>
+
+        <!-- LOTTERY BANNER -->
+        <div class="lottery-banner">
+            <h3>🎰 EVERY SEAL FEEDS THE WEEKLY LOTTERY POT 🎰</h3>
+            <div class="pot">CURRENT POT: 0 TON</div>
+            <p class="sub">Someone's getting a giant check delivered by a guy in a turtle suit. Might be you. 🐢</p>
+        </div>
     </div>
 
+    <!-- FEATURES -->
     <div class="features">
         <div class="feature">
             <h3>⚡ Instant Hash on TON</h3>
-            <p>Under 1 second. Your screenshot, wallet connect, voice note - whatever - gets sealed on-chain forever.</p>
+            <p>Under 1 second. Your screenshot, wallet connect, voice note - whatever - gets sealed on-chain forever. Master Stampway approves.</p>
         </div>
         <div class="feature">
             <h3>🔗 Permanent Verification</h3>
-            <p>Anyone can check. No login, no KYC, no cope. Just paste the hash and see the proof.</p>
+            <p>Anyone can check. No login, no KYC, no cope. Just paste the hash and see the proof. Even your ex can verify you weren't lying.</p>
         </div>
         <div class="feature">
             <h3>🤖 Auto-Seal in Groups</h3>
@@ -2143,13 +2390,14 @@ async def landing_page_memeseal():
         </div>
         <div class="feature">
             <h3>💰 5% Referral Forever</h3>
-            <p>Plug it into your pump clone, DEX, sniper bot. When your users seal through your link → you eat forever.</p>
+            <p>Plug it into your pump clone, DEX, sniper bot. When your users seal through your link → you eat forever. Passive income szn.</p>
         </div>
     </div>
 
+    <!-- PRICING -->
     <div class="pricing">
         <h2>DEGEN PRICING</h2>
-        <p class="pricing-sub">no subscription bullshit unless you want it</p>
+        <p class="pricing-sub">no subscription bullshit unless you want it | every payment feeds the lottery</p>
         <div class="price-cards">
             <div class="price-card">
                 <h3>Pay As You Go</h3>
@@ -2159,6 +2407,7 @@ async def landing_page_memeseal():
                     <li>Single seal</li>
                     <li>Instant on-chain proof</li>
                     <li>Permanent verify link</li>
+                    <li>1 lottery ticket per seal</li>
                     <li>Perfect for 47 coins before breakfast</li>
                 </ul>
             </div>
@@ -2170,15 +2419,72 @@ async def landing_page_memeseal():
                     <li>Unlimited seals</li>
                     <li>API access included</li>
                     <li>Batch operations</li>
+                    <li>20 lottery tickets/month</li>
                     <li>For real cookers who launch daily</li>
                 </ul>
             </div>
         </div>
     </div>
 
+    <!-- CASINO SECTION -->
+    <div class="casino-section">
+        <h2>🎰 COMING NEXT: THE FROG CASINO YOU'LL NEVER LEAVE 🎰</h2>
+        <p class="subtitle">Master Stampway's grand vision. The frog gambles. You win.</p>
+
+        <div class="casino-cards">
+            <div class="casino-card">
+                <div class="emoji">📈</div>
+                <h3>Event Coins</h3>
+                <p>$FROGTRUMP price tracks real election odds. $FROGWEATHER tracks tomorrow's temp. Rake feeds the pot. Bet on reality.</p>
+            </div>
+            <div class="casino-card">
+                <div class="emoji">🎰</div>
+                <h3>Politician Slots</h3>
+                <p>Slots where politicians are the reels. Trump hair = 100x wild. Biden stumble = free spin. Nancy = insider multiplier.</p>
+            </div>
+            <div class="casino-card">
+                <div class="emoji">🐸</div>
+                <h3>Weekly Live Show</h3>
+                <p>Puppet frogs roast the news, then we draw the lottery winner on stream. Degen entertainment meets real money.</p>
+            </div>
+        </div>
+
+        <div class="launch-date">🚀 LAUNCHING Q1 2026 | EARLY SEALERS GET PRIORITY ACCESS + FREE SPINS</div>
+    </div>
+
+    <!-- TESTIMONIALS -->
+    <div class="testimonials">
+        <h2>WHAT SEALERS ARE SAYING</h2>
+        <div class="testimonial-strip">
+            <div class="testimonial">
+                <div class="stars">⭐⭐⭐⭐⭐</div>
+                <p>"Sealed my bag at 4k MC. Won the lottery at 69M MC. Master Stampway called me personally. Life changing."</p>
+                <span class="author">— @whale_anon</span>
+            </div>
+            <div class="testimonial">
+                <div class="stars">⭐⭐⭐⭐⭐</div>
+                <p>"Finally proof I was early. My wife's boyfriend is impressed."</p>
+                <span class="author">— @degen_dad_42</span>
+            </div>
+            <div class="testimonial">
+                <div class="stars">⭐⭐⭐⭐⭐</div>
+                <p>"Integrated the API into my pump.fun clone. 5% kickback is printing. The turtle knows."</p>
+                <span class="author">— @cooker_supreme</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- BARNES SECTION -->
+    <div class="barnes-section">
+        <h3>⚖️ LEGAL GODFATHER INCOMING</h3>
+        <p>Robert Barnes joining soon. Political event coins vetted by the man who bets on elections for fun. The lawyer the establishment fears.</p>
+        <p class="coming">🐸 Frog caricature reveal coming soon...</p>
+    </div>
+
+    <!-- DEV SECTION -->
     <div class="dev-section">
         <h2>DEVELOPERS / COOKERS</h2>
-        <p>Public REST API + 5% referral kickback. Plug it into your pump.fun clone, your DEX, your sniper bot.</p>
+        <p>Public REST API + 5% referral kickback. Use this to auto-seal every launch on your Pump.fun clone → feed our lottery → we all win.</p>
         <div class="code-block">
             <code>
 POST /api/v1/notarize<br>
@@ -2186,20 +2492,35 @@ POST /api/v1/notarize<br>
 &nbsp;&nbsp;"api_key": "your_telegram_id",<br>
 &nbsp;&nbsp;"contract_address": "EQ...",<br>
 &nbsp;&nbsp;"metadata": {{"coin": "FROG420"}}<br>
-}}
+}}<br><br>
+// Every API seal = lottery ticket for your users<br>
+// 5% of their payment = yours forever
             </code>
         </div>
         <a href="/docs" class="badge" style="margin-top: 30px; text-decoration: none;">📚 Full API Docs</a>
     </div>
 
+    <!-- FOOTER -->
     <footer>
-        <p>Powered by TON | Built for degens | Will never rug you</p>
-        <p style="margin-top: 15px;">
+        <p style="font-size: 1rem; color: #666; margin-bottom: 20px;">Powered by TON | Built for degens | Master Stampway never rugs 🐢</p>
+
+        <div class="social-links">
+            <a href="https://t.me/{MEMESEAL_USERNAME}">🤖 Bot</a>
+            <a href="https://t.me/MemeSealTON">📢 Channel</a>
+            <a href="https://x.com/MemeSealTON">𝕏 Twitter</a>
+            <a href="/whitepaper">📄 Whitepaper</a>
+        </div>
+
+        <p style="margin-top: 20px;">
             <a href="https://t.me/{MEMESEAL_USERNAME}">Start Sealing</a> |
             <a href="https://t.me/JPandaJamez">Support</a> |
             <a href="/verify">Verify a Seal</a>
         </p>
-        <p style="margin-top: 20px; font-size: 0.8rem;">© 2025 MemeSeal TON – receipts or GTFO 🐸</p>
+
+        <p style="margin-top: 25px; font-size: 0.75rem; color: #333;">
+            © 2025 MemeSeal TON – receipts or GTFO 🐸<br>
+            <span style="color: #222;">NFA. DYOR. Turtles all the way down.</span>
+        </p>
     </footer>
 </body>
 </html>
