@@ -258,32 +258,62 @@ async def get_contract_code_from_tx(tx_id: str) -> bytes:
         if client:
             await client.close_all()
 
-async def send_ton_transaction(comment: str, amount_ton: float = 0.005):
+async def send_ton_transaction(comment: str, amount_ton: float = 0.005, retries: int = 3):
     """Send TON transaction with comment (notarization proof)"""
-    client = None
-    try:
-        client = LiteBalancer.from_mainnet_config(trust_level=1)
-        await client.start_up()
+    last_error = None
 
-        mnemonics = TON_WALLET_SECRET.split()
-        wallet = await WalletV4R2.from_mnemonic(provider=client, mnemonics=mnemonics)
+    for attempt in range(retries):
+        client = None
+        try:
+            client = LiteBalancer.from_mainnet_config(trust_level=1)
+            await client.start_up()
 
-        # Send transaction to self with comment (proof stored on-chain)
-        result = await wallet.transfer(
-            destination=SERVICE_TON_WALLET,
-            amount=int(amount_ton * 1e9),  # Convert to nanotons
-            body=comment
-        )
+            mnemonics = TON_WALLET_SECRET.split()
+            wallet = await WalletV4R2.from_mnemonic(provider=client, mnemonics=mnemonics)
 
-        print(f"✅ Notarization transaction sent with comment: {comment}")
-        return result
-    except Exception as e:
-        print(f"❌ Error sending transaction: {e}")
-        print(f"   Make sure wallet has sufficient TON balance")
-        raise
-    finally:
-        if client:
-            await client.close_all()
+            # Send transaction to self with comment (proof stored on-chain)
+            result = await wallet.transfer(
+                destination=SERVICE_TON_WALLET,
+                amount=int(amount_ton * 1e9),  # Convert to nanotons
+                body=comment
+            )
+
+            print(f"✅ Notarization transaction sent with comment: {comment}")
+            return result
+        except Exception as e:
+            last_error = e
+            error_str = str(e).lower()
+            print(f"⚠️ Attempt {attempt + 1}/{retries} failed: {e}")
+
+            # If contract not initialized, need to deploy wallet first
+            if "not initialized" in error_str or "-256" in error_str:
+                print("💡 Wallet contract not deployed. Attempting deploy...")
+                try:
+                    # Try to deploy wallet by sending minimal amount
+                    await wallet.transfer(
+                        destination=SERVICE_TON_WALLET,
+                        amount=1,  # 1 nanoton to deploy
+                        body="MemeSeal:WalletDeploy"
+                    )
+                    await asyncio.sleep(5)  # Wait for deploy
+                    continue  # Retry main transaction
+                except Exception as deploy_err:
+                    print(f"❌ Deploy attempt failed: {deploy_err}")
+
+            # Liteserver crash - wait and retry
+            if "liteserver" in error_str or "crashed" in error_str:
+                await asyncio.sleep(2)
+                continue
+
+        finally:
+            if client:
+                try:
+                    await client.close_all()
+                except:
+                    pass
+
+    print(f"❌ All {retries} attempts failed. Last error: {last_error}")
+    raise last_error
 
 async def send_payout_transaction(destination: str, amount_ton: float, memo: str = "NotaryTON Payout"):
     """Send TON payout to user wallet"""
