@@ -10,7 +10,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import Update, LabeledPrice, PreCheckoutQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 from dotenv import load_dotenv
-from pytoniq import LiteBalancer, WalletV4R2, Address
+from pytoniq import LiteBalancer, WalletV5R1, Address
 import uvicorn
 
 # Database layer (PostgreSQL with Neon)
@@ -389,7 +389,7 @@ async def send_ton_transaction(comment: str, amount_ton: float = 0.005, retries:
             await client.start_up()
 
             mnemonics = TON_WALLET_SECRET.split()
-            wallet = await WalletV4R2.from_mnemonic(provider=client, mnemonics=mnemonics)
+            wallet = await WalletV5R1.from_mnemonic(provider=client, mnemonics=mnemonics, network_global_id=-239)
 
             # Send transaction to self with comment (proof stored on-chain)
             result = await wallet.transfer(
@@ -443,7 +443,7 @@ async def send_payout_transaction(destination: str, amount_ton: float, memo: str
         await client.start_up()
 
         mnemonics = TON_WALLET_SECRET.split()
-        wallet = await WalletV4R2.from_mnemonic(provider=client, mnemonics=mnemonics)
+        wallet = await WalletV5R1.from_mnemonic(provider=client, mnemonics=mnemonics, network_global_id=-239)
 
         # Send to user's wallet
         result = await wallet.transfer(
