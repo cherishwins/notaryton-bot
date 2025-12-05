@@ -24,6 +24,7 @@ from social import social_poster, announce_seal
 
 # MemeScan - Meme coin terminal
 from memescan.bot import router as memescan_router, get_client as get_memescan_client
+from memescan.twitter import memescan_twitter
 
 # Load .env
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
@@ -5501,6 +5502,12 @@ async def on_startup():
         memescan_webhook_url = f"{WEBHOOK_URL}{MEMESCAN_WEBHOOK_PATH}"
         await memescan_bot.set_webhook(memescan_webhook_url, drop_pending_updates=True)
         print(f"✅ MemeScan webhook set to: {memescan_webhook_url}")
+
+    # Start MemeScan Twitter auto-poster (if enabled)
+    if os.getenv("MEMESCAN_TWITTER_ENABLED", "").lower() == "true":
+        memescan_twitter.initialize()
+        asyncio.create_task(memescan_twitter.run_auto_poster(interval_seconds=1800))
+        print("✅ MemeScan Twitter auto-poster started (every 30 min)")
 
     # Join groups
     for group_id in GROUP_IDS:
