@@ -22,18 +22,23 @@ from database import db
 # Social media auto-poster (X + Telegram channel)
 from social import social_poster, announce_seal
 
+# MemeScan - Meme coin terminal
+from memescan.bot import router as memescan_router, get_client as get_memescan_client
+
 # Load .env
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 # Load config
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MEMESEAL_BOT_TOKEN = os.getenv("MEMESEAL_BOT_TOKEN")
+MEMESCAN_BOT_TOKEN = os.getenv("MEMESCAN_BOT_TOKEN")
 TON_CENTER_API_KEY = os.getenv("TON_CENTER_API_KEY")
 TON_WALLET_SECRET = os.getenv("TON_WALLET_SECRET")
 SERVICE_TON_WALLET = os.getenv("SERVICE_TON_WALLET")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://notaryton.com")
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 MEMESEAL_WEBHOOK_PATH = f"/webhook/{MEMESEAL_BOT_TOKEN}" if MEMESEAL_BOT_TOKEN else None
+MEMESCAN_WEBHOOK_PATH = f"/webhook/{MEMESCAN_BOT_TOKEN}" if MEMESCAN_BOT_TOKEN else None
 GROUP_IDS = os.getenv("GROUP_IDS", "").split(",")  # Comma-separated chat IDs
 
 # TonAPI for real-time webhooks (replaces 30s polling!)
@@ -59,6 +64,12 @@ dp = Dispatcher()
 # Initialize MemeSeal bot (degen branding) - shares same database/wallet
 memeseal_bot = Bot(token=MEMESEAL_BOT_TOKEN) if MEMESEAL_BOT_TOKEN else None
 memeseal_dp = Dispatcher() if MEMESEAL_BOT_TOKEN else None
+
+# Initialize MemeScan bot (meme coin terminal)
+memescan_bot = Bot(token=MEMESCAN_BOT_TOKEN) if MEMESCAN_BOT_TOKEN else None
+memescan_dp = Dispatcher() if MEMESCAN_BOT_TOKEN else None
+if memescan_dp:
+    memescan_dp.include_router(memescan_router)
 
 app = FastAPI()
 
@@ -2725,6 +2736,15 @@ if MEMESEAL_WEBHOOK_PATH:
         await memeseal_dp.feed_update(memeseal_bot, update)
         return {"ok": True}
 
+# MemeScan webhook endpoint (meme coin terminal)
+if MEMESCAN_WEBHOOK_PATH:
+    @app.post(MEMESCAN_WEBHOOK_PATH)
+    async def memescan_webhook_handler(request: Request):
+        """Handle incoming webhook updates from Telegram (MemeScan)"""
+        update = Update(**(await request.json()))
+        await memescan_dp.feed_update(memescan_bot, update)
+        return {"ok": True}
+
 # ========================
 # TONAPI WEBHOOK - Real-time payment detection (no more 30s polling!)
 # ========================
@@ -5067,6 +5087,12 @@ async def on_startup():
         await memeseal_bot.set_webhook(memeseal_webhook_url, drop_pending_updates=True)
         print(f"✅ MemeSeal webhook set to: {memeseal_webhook_url}")
 
+    # Set MemeScan webhook (if configured)
+    if memescan_bot and MEMESCAN_WEBHOOK_PATH:
+        memescan_webhook_url = f"{WEBHOOK_URL}{MEMESCAN_WEBHOOK_PATH}"
+        await memescan_bot.set_webhook(memescan_webhook_url, drop_pending_updates=True)
+        print(f"✅ MemeScan webhook set to: {memescan_webhook_url}")
+
     # Join groups
     for group_id in GROUP_IDS:
         if group_id.strip():
@@ -5093,6 +5119,11 @@ async def on_shutdown():
     await bot.session.close()
     if memeseal_bot:
         await memeseal_bot.session.close()
+    if memescan_bot:
+        await memescan_bot.session.close()
+        # Also close memescan API clients
+        client = get_memescan_client()
+        await client.close()
     await db.disconnect()
     print("🛑 Bot sessions and database closed (webhooks preserved)")
 
