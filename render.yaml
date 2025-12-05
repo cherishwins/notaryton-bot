@@ -1,21 +1,62 @@
+# ============================================
+# RENDER DEPLOYMENT CONFIGURATION
+# ============================================
+# Note: Sensitive values are set in Render Dashboard, not here.
+# This file documents the expected environment variables.
+
 services:
   - type: web
     name: notaryton-bot
-    env: python
-    runtime: python-3.11.0
-    buildCommand: pip install -r requirements.txt && pytest tests/ -v
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
+    healthCheckPath: /health
     envVars:
+      # Telegram Bots (set in dashboard)
       - key: BOT_TOKEN
         sync: false
-      - key: TON_CENTER_API_KEY
+      - key: MEMESEAL_BOT_TOKEN
         sync: false
+
+      # TON Blockchain (set in dashboard)
       - key: TON_WALLET_SECRET
         sync: false
       - key: SERVICE_TON_WALLET
         sync: false
+      - key: TON_CENTER_API_KEY
+        sync: false
+
+      # TonAPI for webhooks (set in dashboard)
+      - key: TONAPI_KEY
+        sync: false
+
+      # Database (auto-linked from Render PostgreSQL)
+      - key: DATABASE_URL
+        fromDatabase:
+          name: notaryton-db
+          property: connectionString
+
+      # Webhook URL
       - key: WEBHOOK_URL
         value: https://notaryton.com
+
+      # Twitter/X API (set in dashboard)
+      - key: TWITTER_API_KEY
+        sync: false
+      - key: TWITTER_API_SECRET
+        sync: false
+      - key: TWITTER_ACCESS_TOKEN
+        sync: false
+      - key: TWITTER_ACCESS_TOKEN_SECRET
+        sync: false
+
+      # Optional
       - key: GROUP_IDS
         value: ""
-    healthCheckPath: /health
+
+databases:
+  - name: notaryton-db
+    plan: free
+    databaseName: notaryton
+    user: notaryton

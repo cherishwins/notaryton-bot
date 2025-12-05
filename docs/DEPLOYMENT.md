@@ -6,18 +6,18 @@ Complete guide to deploy your TON memecoin auto-notarization bot to Render.com w
 
 ## ⚠️ BEFORE YOU START
 
-### 1. Fix Wallet Issue (CRITICAL)
+### 1. Fund Your Wallet (CRITICAL)
 
-Your wallet needs TON before the bot can work:
+Your service wallet needs TON before the bot can work:
 
 ```bash
 # Check your wallet balance
-open https://tonscan.org/address/UQA7fe14R2mFavSOI_oiIVp4lcEo-lypybpIiLD2OmazZpY7
+open https://tonscan.org/address/YOUR_SERVICE_WALLET_ADDRESS
 ```
 
 **If balance is 0:**
 1. Open Telegram → @wallet
-2. Send → Paste: `UQA7fe14R2mFavSOI_oiIVp4lcEo-lypybpIiLD2OmazZpY7`
+2. Send → Paste your `SERVICE_TON_WALLET` address
 3. Amount: 0.5 TON (or more)
 4. Wait 1-2 minutes → Check tonscan.org again
 
@@ -77,21 +77,24 @@ gh repo create notaryton-bot --public --source=. --remote=origin --push
    - **Plan**: Free
 
 5. **Add Environment Variables**:
-   Click "Advanced" → "Add Environment Variable" for each:
+   Click "Advanced" → "Add Environment Variable" for each (see `.env.template` for full list):
 
-   ```
-   BOT_TOKEN=8513443424:AAHKhpZOJJL9QVDHr-3dgYzdpw_JOMvHUJc
-   TON_CENTER_API_KEY=05a0e608459eb273fe48f502a2c8bd5df3894db4cdd250bffa7e3a6b37bf5550
-   TON_WALLET_SECRET=sign frequent wing picnic material slush present mammal grit remind cricket pulse oxygen velvet jeans train risk trigger glory just velvet aspect walnut shield
-   SERVICE_TON_WALLET=UQA7fe14R2mFavSOI_oiIVp4lcEo-lypybpIiLD2OmazZpY7
-   WEBHOOK_URL=https://notaryton.onrender.com
-   GROUP_IDS=
-   ```
+   | Variable | Description |
+   |----------|-------------|
+   | `BOT_TOKEN` | From @BotFather |
+   | `MEMESEAL_BOT_TOKEN` | Second bot token |
+   | `TON_WALLET_SECRET` | 24-word mnemonic |
+   | `SERVICE_TON_WALLET` | Your wallet address |
+   | `TON_CENTER_API_KEY` | From toncenter.com |
+   | `TONAPI_KEY` | From tonapi.io |
+   | `DATABASE_URL` | Auto-linked from Render PostgreSQL |
+   | `WEBHOOK_URL` | `https://notaryton.onrender.com` initially |
+   | `TWITTER_API_*` | (Optional) For X/Twitter posting |
 
    ⚠️ **IMPORTANT**:
-   - Use your actual values from `.env`
-   - `WEBHOOK_URL` will be `https://notaryton.onrender.com` (Render auto-assigns this)
-   - Leave `GROUP_IDS` empty for now (add group chat IDs later)
+   - Copy values from your local `.env` file
+   - `WEBHOOK_URL` will be `https://notaryton.onrender.com` initially
+   - Update to custom domain once DNS is configured
 
 6. **Click "Create Web Service"**
 
@@ -290,19 +293,14 @@ Your wallet has 0 TON. **Transfer TON first** (see top of this guide).
 
 ### Payments Not Activating
 
-Payment polling runs automatically every 30 seconds with retry logic. If payments aren't activating:
+TON payments are detected via **TonAPI webhooks** (instant) with polling fallback. If payments aren't activating:
 
-1. **Check logs** for Liteserver errors (will auto-retry with exponential backoff)
-2. **Verify memo format** - user must include their Telegram user ID as the memo
-3. **Check wallet balance** - bot wallet needs TON to send notarization txs
+1. **Check TONAPI_KEY** is set correctly in Render env vars
+2. **Check logs** for webhook or liteserver errors
+3. **Verify memo format** - user must include their Telegram user ID as the memo
+4. **Check wallet balance** - bot wallet needs TON to send notarization txs
 
-To manually activate a subscription (emergency only):
-```python
-# In Python shell
-import asyncio
-from bot import add_subscription
-asyncio.run(add_subscription(user_id=123456789, months=1))
-```
+Telegram Stars payments are processed instantly via Telegram's payment API.
 
 ---
 

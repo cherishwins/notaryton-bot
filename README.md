@@ -105,7 +105,7 @@ curl -X POST https://notaryton.com/api/v1/notarize \
   }'
 ```
 
-See full API docs: [API.md](API.md)
+See full API docs: [docs/API.md](docs/API.md)
 
 ---
 
@@ -114,7 +114,7 @@ See full API docs: [API.md](API.md)
 - **Bot**: aiogram 3.15+ (Telegram)
 - **Server**: FastAPI + uvicorn
 - **Chain**: TON via pytoniq + TonAPI webhooks
-- **Database**: PostgreSQL (Neon)
+- **Database**: Render PostgreSQL
 - **Payments**: Telegram Stars + native TON
 - **Deploy**: Render.com
 - **Domain**: notaryton.com

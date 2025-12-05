@@ -6,9 +6,9 @@ Production: https://notaryton.com
 ```
 
 ## Authentication
-Use your Telegram user ID as the API key. Get it via `/api` command in @NotaryTON_bot.
+Use your Telegram user ID as the API key. Get it via `/api` command in @MemeSealTON_bot.
 
-**Requirements**: Active subscription (0.1 TON/month)
+**Requirements**: Active subscription (15 Stars or 0.3 TON/month)
 
 ---
 
@@ -181,7 +181,7 @@ curl https://notaryton.com/api/v1/verify/a3f8b92c1e4d5678901234567890abcdef12345
 | Code | Message | Solution |
 |------|---------|----------|
 | 400 | Missing api_key or contract_address | Check request body |
-| 401 | No active subscription | Subscribe via @NotaryTON_bot |
+| 401 | No active subscription | Subscribe via @MemeSealTON_bot |
 | 404 | Contract not found | Verify contract address |
 | 429 | Rate limit exceeded | Upgrade plan or wait |
 | 500 | Internal server error | Contact support |
@@ -321,7 +321,7 @@ async def monitor_launches():
 
 ## Support
 
-- **Telegram**: @NotaryTON_bot
+- **Telegram**: @MemeSealTON_bot
 - **Issues**: [GitHub Issues](https://github.com/cherishwins/notaryton-bot/issues)
 - **Docs**: https://notaryton.com/docs
 
@@ -329,12 +329,16 @@ async def monitor_launches():
 
 ## Changelog
 
+### v2.1 (2025-12-04)
+- ✅ TonAPI webhooks for instant payment detection
+- ✅ X/Twitter auto-posting
+
 ### v2.0 (2025-11-24)
 - ✅ Public API endpoints
 - ✅ Batch notarization
 - ✅ Public verification
 - ✅ Referral system
-- ✅ Automated payment polling
+- ✅ Telegram Stars payments
 
 ### v1.0 (2025-11-01)
 - Initial release

@@ -1,7 +1,7 @@
 """
 Database Layer for NotaryTON
 ============================
-PostgreSQL database connection and operations using asyncpg with Neon.
+PostgreSQL database connection and operations using asyncpg.
 
 Usage:
     from database import db
@@ -673,13 +673,13 @@ class Database:
             )
 
         # Create connection pool
+        # Render PostgreSQL requires SSL
         self._pool = await asyncpg.create_pool(
             url,
             min_size=2,
             max_size=10,
             command_timeout=30,
-            # SSL required for Neon
-            ssl='require' if 'neon' in url.lower() else 'prefer'
+            ssl='require'
         )
 
         # Initialize repositories

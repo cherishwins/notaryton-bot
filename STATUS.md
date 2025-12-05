@@ -73,8 +73,8 @@ Both bots share the same database and wallet.
 ## Tech Stack
 
 - **Hosting:** Render.com (auto-deploys from GitHub)
-- **Database:** PostgreSQL on Neon
-- **Blockchain:** TON (via pytoniq + TonAPI)
+- **Database:** Render PostgreSQL
+- **Blockchain:** TON (via pytoniq + TonAPI webhooks)
 - **Payments:** Telegram Stars + native TON
 - **Domain:** notaryton.com
 
