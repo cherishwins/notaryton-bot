@@ -3242,8 +3242,10 @@ async def verify_page():
     <meta name="twitter:description" content="Check if any hash has been sealed on TON blockchain.">
 
     <!-- Favicon -->
-    <link rel="icon" type="image/png" href="/static/memeseal_icon.png">
-    <link rel="apple-touch-icon" href="/static/memeseal_icon.png">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
 
     <!-- Analytics -->
     <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
@@ -3675,8 +3677,10 @@ async def landing_page_memeseal():
     <meta name="twitter:image" content="https://notaryton.com/static/memeseal_banner.png">
 
     <!-- Favicon -->
-    <link rel="icon" type="image/png" href="/static/memeseal_icon.png">
-    <link rel="apple-touch-icon" href="/static/memeseal_icon.png">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
 
     <!-- Analytics -->
     <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
@@ -4484,8 +4488,9 @@ async def landing_page_legacy():
     <meta name="twitter:image" content="https://notaryton.com/static/logo.png">
 
     <!-- Favicon -->
-    <link rel="icon" type="image/png" href="/static/logo.png">
-    <link rel="apple-touch-icon" href="/static/logo.png">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
 
     <!-- Analytics -->
     <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
