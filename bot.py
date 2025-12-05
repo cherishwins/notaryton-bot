@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import Update, LabeledPrice, PreCheckoutQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
+from aiogram.types import Update, LabeledPrice, PreCheckoutQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent, WebAppInfo
 from dotenv import load_dotenv
 from pytoniq import LiteBalancer, WalletV5R1, Address
 import uvicorn
@@ -1951,7 +1951,11 @@ if memeseal_dp:
 
         # Add helpful buttons
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="🎰 Check Lottery Pot", callback_data="ms_check_pot")],
+            [types.InlineKeyboardButton(
+                text="🎰 PLAY CASINO",
+                web_app=WebAppInfo(url="https://memeseal-casino.vercel.app")
+            )],
+            [types.InlineKeyboardButton(text="💰 Check Lottery Pot", callback_data="ms_check_pot")],
             [types.InlineKeyboardButton(text="🚀 Go Unlimited (20 ⭐/mo)", callback_data="ms_pay_stars_sub")]
         ])
 
@@ -2418,6 +2422,31 @@ if memeseal_dp:
             f"20% of fees feed the pot\n\n"
             f"/mytickets to check your odds 🎫",
             parse_mode="Markdown"
+        )
+
+    @memeseal_dp.message(Command("casino"))
+    async def memeseal_casino(message: types.Message):
+        """Open the casino mini app"""
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(
+                text="🎰 OPEN CASINO",
+                web_app=WebAppInfo(url="https://memeseal-casino.vercel.app")
+            )]
+        ])
+
+        await message.answer(
+            "🎰🐸 **MEMESEAL CASINO**\n\n"
+            "**GAMES:**\n"
+            "• 🎰 Politician Slots (100x jackpot)\n"
+            "• 🚀 Frog Rocket (crash game)\n"
+            "• 🎯 Election Roulette\n\n"
+            "**THE DEAL:**\n"
+            "• 20% of ALL bets feed the lottery pot\n"
+            "• Connect TON wallet to play\n"
+            "• Win big or feed the frogs\n\n"
+            "Tap below to enter the casino 👇",
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
 
     @memeseal_dp.message(Command("mytickets"))
