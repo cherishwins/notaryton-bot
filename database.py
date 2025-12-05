@@ -515,9 +515,9 @@ class LotteryRepository:
             return row['count'] if row else 0
 
     async def pick_winner(self, draw_id: int) -> Optional[int]:
-        """Randomly pick a winner from current entries (weighted by entry count)"""
+        """Randomly pick a winner from current entries (weighted by entry count - more entries = more chances)"""
         async with self._pool.acquire() as conn:
-            # Pick random entry
+            # Pick random entry (each entry = equal chance, so more entries = better odds)
             row = await conn.fetchrow("""
                 SELECT user_id FROM lottery_entries
                 WHERE draw_id IS NULL
@@ -525,17 +525,21 @@ class LotteryRepository:
                 LIMIT 1
             """)
             if row:
-                # Mark all current entries with draw_id
+                winner_id = row['user_id']
+                # Mark all current entries with this draw_id
                 await conn.execute("""
                     UPDATE lottery_entries SET draw_id = $1 WHERE draw_id IS NULL
                 """, draw_id)
-                # Mark winner entry
+                # Mark ONE winner entry using subquery (PostgreSQL compatible)
                 await conn.execute("""
                     UPDATE lottery_entries SET won = TRUE
-                    WHERE user_id = $1 AND draw_id = $2
-                    LIMIT 1
-                """, row['user_id'], draw_id)
-                return row['user_id']
+                    WHERE id = (
+                        SELECT id FROM lottery_entries
+                        WHERE user_id = $1 AND draw_id = $2
+                        LIMIT 1
+                    )
+                """, winner_id, draw_id)
+                return winner_id
             return None
 
 

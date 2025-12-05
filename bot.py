@@ -211,6 +211,90 @@ async def cleanup_pending_payments():
         await asyncio.sleep(300)  # Every 5 minutes
 
 
+# 🎰 LOTTERY DRAW TASK - picks winner every Sunday at 20:00 UTC
+async def run_sunday_lottery_draw():
+    """Background task: Run lottery draw every Sunday at 20:00 UTC (8pm - US prime time)"""
+    from datetime import timezone
+
+    while True:
+        try:
+            # Calculate time until next Sunday 20:00 UTC
+            now = datetime.now(timezone.utc)
+            days_until_sunday = (6 - now.weekday()) % 7
+            if days_until_sunday == 0 and now.hour >= 20:
+                # It's already past 8pm Sunday, wait until next week
+                days_until_sunday = 7
+
+            next_draw = now + timedelta(days=days_until_sunday)
+            next_draw = next_draw.replace(hour=20, minute=0, second=0, microsecond=0)
+
+            sleep_seconds = (next_draw - now).total_seconds()
+            hours_until = sleep_seconds / 3600
+            print(f"🎰 Lottery draw scheduled for {next_draw.strftime('%Y-%m-%d %H:%M UTC')} ({hours_until:.1f}h from now)")
+
+            # Sleep until draw time
+            await asyncio.sleep(sleep_seconds)
+
+            # === DRAW TIME ===
+            print("🎰 LOTTERY DRAW STARTING...")
+
+            # Get pot size before draw
+            pot_stars = await db.lottery.get_pot_size_stars()
+            pot_ton = await db.lottery.get_pot_size_ton()
+            total_entries = await db.lottery.get_total_entries()
+
+            if total_entries == 0:
+                print("⚠️ No lottery entries - skipping draw")
+                continue
+
+            # Generate draw ID from timestamp
+            draw_id = int(datetime.now(timezone.utc).timestamp())
+
+            # Pick the winner!
+            winner_id = await db.lottery.pick_winner(draw_id)
+
+            if winner_id:
+                print(f"🏆 LOTTERY WINNER: User {winner_id} wins {pot_stars} ⭐ ({pot_ton:.4f} TON)!")
+
+                # Notify winner via DM
+                winner_msg = (
+                    f"🏆🎰 **YOU WON THE LOTTERY!** 🎰🏆\n\n"
+                    f"Prize: **{pot_stars} ⭐** ({pot_ton:.4f} TON)\n"
+                    f"Entries: {total_entries} tickets in this draw\n\n"
+                    f"Congratulations, degen! 🐸\n\n"
+                    f"Prize will be credited to your account."
+                )
+
+                # Try both bots to reach the winner
+                for send_bot in [memeseal_bot, bot]:
+                    if send_bot:
+                        try:
+                            await send_bot.send_message(winner_id, winner_msg, parse_mode="Markdown")
+                            break
+                        except Exception as e:
+                            print(f"⚠️ Could not DM winner via {send_bot}: {e}")
+
+                # Announce on socials
+                try:
+                    await social_poster.post_lottery_winner(winner_id, pot_ton, pot_stars)
+                except Exception as e:
+                    print(f"⚠️ Could not post winner to socials: {e}")
+
+                # Credit winner's referral earnings (so they can withdraw)
+                try:
+                    await db.users.add_referral_earnings(winner_id, pot_ton)
+                    print(f"✅ Credited {pot_ton:.4f} TON to winner's account")
+                except Exception as e:
+                    print(f"⚠️ Could not credit winner: {e}")
+            else:
+                print(f"❌ Lottery draw failed - no winner selected")
+
+        except Exception as e:
+            print(f"❌ Lottery draw error: {e}")
+            # Don't crash - sleep 1 hour and retry
+            await asyncio.sleep(3600)
+
+
 # Minimum withdrawal amount
 MIN_WITHDRAWAL_TON = 0.05
 
@@ -1088,13 +1172,14 @@ async def cmd_referral(message: types.Message):
 
 
 def get_next_draw_date() -> str:
-    """Get next Sunday at 12:00 UTC as draw date"""
-    now = datetime.now()
+    """Get next Sunday at 20:00 UTC (8pm - US prime time) as draw date"""
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
     days_until_sunday = (6 - now.weekday()) % 7
-    if days_until_sunday == 0 and now.hour >= 12:
+    if days_until_sunday == 0 and now.hour >= 20:
         days_until_sunday = 7
     next_draw = now + timedelta(days=days_until_sunday)
-    next_draw = next_draw.replace(hour=12, minute=0, second=0, microsecond=0)
+    next_draw = next_draw.replace(hour=20, minute=0, second=0, microsecond=0)
     return next_draw.strftime("%Y-%m-%d %H:%M UTC")
 
 
@@ -2686,24 +2771,23 @@ async def privacy_policy():
 @app.get("/pot")
 async def get_lottery_pot():
     """Get current lottery pot value - polled by landing page"""
-    # For now, return a growing simulated pot based on total seals
-    # TODO: Replace with actual lottery pot tracking
     try:
-        async with db.pool.acquire() as conn:
-            # Count total seals as proxy for pot (each seal adds to pot)
-            result = await conn.fetchone("SELECT COUNT(*) as total FROM notarizations")
-            total_seals = result['total'] if result else 0
-            # Each seal contributes ~0.005 TON to pot (a portion of the 0.015 fee)
-            pot_ton = total_seals * 0.005
-            pot_stars = total_seals  # 1 star per seal
-            return {
-                "stars": pot_stars,
-                "ton": round(pot_ton, 4),
-                "seals": total_seals
-            }
+        # Use real DB values instead of simulation
+        pot_stars = await db.lottery.get_pot_size_stars()
+        pot_ton = await db.lottery.get_pot_size_ton()
+        total_entries = await db.lottery.get_total_entries()
+        unique_players = await db.lottery.get_unique_participants()
+        next_draw = get_next_draw_date()
+        return {
+            "stars": pot_stars,
+            "ton": round(pot_ton, 4),
+            "entries": total_entries,
+            "players": unique_players,
+            "next_draw": next_draw
+        }
     except Exception as e:
         print(f"❌ Error getting pot: {e}")
-        return {"stars": 0, "ton": 0.0, "seals": 0}
+        return {"stars": 0, "ton": 0.0, "entries": 0, "players": 0, "next_draw": "Sunday 20:00 UTC"}
 
 
 @app.get("/favicon.ico")
@@ -4719,6 +4803,9 @@ async def on_startup():
 
     # 🐸 Start pending payment cleanup task
     asyncio.create_task(cleanup_pending_payments())
+
+    # 🎰 Start lottery draw task (Sunday 20:00 UTC)
+    asyncio.create_task(run_sunday_lottery_draw())
 
     os.makedirs("downloads", exist_ok=True)
 
