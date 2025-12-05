@@ -3425,7 +3425,7 @@ async def landing_page_memeseal():
     <!-- Analytics -->
     <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
 
-    <!-- Live Pot Counter -->
+    <!-- Live Pot Counter + Countdown -->
     <script>
         async function updatePot() {{
             try {{
@@ -3433,14 +3433,41 @@ async def landing_page_memeseal():
                 const data = await res.json();
                 const potEl = document.getElementById('pot-amount');
                 const tonEl = document.getElementById('pot-ton');
+                const drawEl = document.getElementById('next-draw');
+                const countdownEl = document.getElementById('countdown');
                 if (potEl) potEl.innerText = data.stars + ' ⭐';
                 if (tonEl) tonEl.innerText = '~' + data.ton.toFixed(4) + ' TON';
+                if (drawEl && data.next_draw) drawEl.innerText = data.next_draw;
             }} catch (e) {{
                 console.log('Pot fetch error:', e);
             }}
         }}
+
+        function updateCountdown() {{
+            // Next Sunday at 20:00 UTC
+            const now = new Date();
+            const utcNow = new Date(now.toUTCString());
+            let daysUntilSunday = (7 - utcNow.getUTCDay()) % 7;
+            if (daysUntilSunday === 0 && utcNow.getUTCHours() >= 20) daysUntilSunday = 7;
+
+            const nextDraw = new Date(utcNow);
+            nextDraw.setUTCDate(utcNow.getUTCDate() + daysUntilSunday);
+            nextDraw.setUTCHours(20, 0, 0, 0);
+
+            const diff = nextDraw - utcNow;
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+            const countdownEl = document.getElementById('countdown');
+            if (countdownEl) {{
+                countdownEl.innerText = days + 'd ' + hours + 'h ' + mins + 'm';
+            }}
+        }}
+
         setInterval(updatePot, 10000);
-        document.addEventListener('DOMContentLoaded', updatePot);
+        setInterval(updateCountdown, 60000);
+        document.addEventListener('DOMContentLoaded', () => {{ updatePot(); updateCountdown(); }});
     </script>
 
     <style>
@@ -3560,6 +3587,23 @@ async def landing_page_memeseal():
             font-size: 0.85rem;
             margin-top: 10px;
             opacity: 0.9;
+        }}
+
+        .countdown-row {{
+            background: rgba(0, 0, 0, 0.3);
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin-top: 15px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #fff;
+            display: inline-block;
+        }}
+
+        .countdown-row #countdown {{
+            color: #FFD700;
+            font-family: 'Courier New', monospace;
+            font-size: 1.2rem;
         }}
 
         /* LOTTERY SCENE */
@@ -3984,6 +4028,7 @@ async def landing_page_memeseal():
         <div class="lottery-banner">
             <h3>🎰 EVERY SEAL FEEDS THE WEEKLY LOTTERY POT 🎰</h3>
             <div class="pot">CURRENT POT: <span id="pot-amount">0 ⭐</span> (<span id="pot-ton">~0.0000 TON</span>)</div>
+            <div class="countdown-row">⏰ NEXT DRAW: <span id="countdown">--</span></div>
             <p class="sub">Someone's getting a giant check delivered by a guy in a turtle suit. Might be you. 🐢</p>
         </div>
     </div>
