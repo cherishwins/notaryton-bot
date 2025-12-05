@@ -4717,8 +4717,8 @@ async def seed_lottery(amount_stars: int = 2500, secret: str = ""):
     house_user_id = 1  # System/house user
 
     try:
-        # Ensure house user exists
-        await db.users.get_or_create(house_user_id)
+        # Ensure house user exists (create has ON CONFLICT DO NOTHING)
+        await db.users.create(house_user_id, referral_code=f"REF{house_user_id}")
 
         # Add lottery entry with specified amount
         await db.lottery.add_entry(house_user_id, amount_stars)
