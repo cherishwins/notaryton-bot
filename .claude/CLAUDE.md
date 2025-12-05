@@ -94,11 +94,35 @@ No wallet connection. No signup. No friction.
 ## Active Integrations
 
 - **Telegram Bot API** - aiogram 3.15+
-- **TON Blockchain** - pytoniq + LiteBalancer
-- **TonAPI** - Real-time payment webhooks
-- **PostgreSQL** - Neon serverless
+- **TON Blockchain** - pytoniq + LiteBalancer + WalletV5R1
+- **TonAPI** - Real-time payment webhooks (HMAC verified)
+- **PostgreSQL** - Render PostgreSQL (SSL required)
 - **X/Twitter** - Auto-post seals
 - **Telegram Stars** - In-app payments
+
+## Code Structure
+
+```
+notaryton-bot/
+├── bot.py              # Main bot (handlers, payments, API)
+├── config.py           # All env vars + constants
+├── database.py         # PostgreSQL operations
+├── social.py           # X/Twitter + channel posting
+├── utils/
+│   ├── i18n.py         # Translations (EN/RU/ZH)
+│   ├── hashing.py      # SHA-256 utilities
+│   └── memo.py         # Payment memo generation
+├── tests/              # pytest test suite
+└── docs/               # Documentation
+```
+
+## Recent Changes (Dec 2025)
+
+- Lottery draw runs Sundays at midnight UTC with auto-payout
+- TonAPI webhook signature verification (HMAC)
+- Auto-seal triggers when webhook detects payment
+- Extracted config.py and utils/ for modularity
+- Fixed WalletV5R1 (was using V4R2)
 
 ## When Working on This Project
 
