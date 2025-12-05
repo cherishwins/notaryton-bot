@@ -1,4 +1,6 @@
 import hashlib
+import hmac
+import json
 import os
 import re
 import asyncio
@@ -35,6 +37,7 @@ GROUP_IDS = os.getenv("GROUP_IDS", "").split(",")  # Comma-separated chat IDs
 
 # TonAPI for real-time webhooks (replaces 30s polling!)
 TONAPI_KEY = os.getenv("TONAPI_KEY", "")
+TONAPI_WEBHOOK_SECRET = os.getenv("TONAPI_WEBHOOK_SECRET", "")
 
 # Known deploy bots (add more as needed)
 DEPLOY_BOTS = ["@tondeployer", "@memelaunchbot", "@toncoinbot"]
@@ -204,29 +207,33 @@ async def cleanup_pending_payments():
             expired_payments = [uid for uid, data in pending_ton_payments.items() if now - data["timestamp"] > 600]
             for uid in expired_payments:
                 del pending_ton_payments[uid]
-            if expired_files or expired_payments:
-                print(f"🧹 Cleaned {len(expired_files)} files, {len(expired_payments)} payments")
+            # Clean payment_memo_lookup (expire after 10 min)
+            expired_memos = [memo for memo, data in payment_memo_lookup.items() if now - data["timestamp"] > 600]
+            for memo in expired_memos:
+                del payment_memo_lookup[memo]
+            if expired_files or expired_payments or expired_memos:
+                print(f"🧹 Cleaned {len(expired_files)} files, {len(expired_payments)} payments, {len(expired_memos)} memos")
         except Exception as e:
             print(f"⚠️ Cleanup error: {e}")
         await asyncio.sleep(300)  # Every 5 minutes
 
 
-# 🎰 LOTTERY DRAW TASK - picks winner every Sunday at 20:00 UTC
+# 🎰 LOTTERY DRAW TASK - picks winner every Sunday at 00:00 UTC (midnight)
 async def run_sunday_lottery_draw():
-    """Background task: Run lottery draw every Sunday at 20:00 UTC (8pm - US prime time)"""
+    """Background task: Run lottery draw every Sunday at 00:00 UTC (midnight)"""
     from datetime import timezone
 
     while True:
         try:
-            # Calculate time until next Sunday 20:00 UTC
+            # Calculate time until next Sunday 00:00 UTC (midnight)
             now = datetime.now(timezone.utc)
             days_until_sunday = (6 - now.weekday()) % 7
-            if days_until_sunday == 0 and now.hour >= 20:
-                # It's already past 8pm Sunday, wait until next week
+            if days_until_sunday == 0 and now.hour > 0:
+                # It's already past midnight Sunday, wait until next week
                 days_until_sunday = 7
 
             next_draw = now + timedelta(days=days_until_sunday)
-            next_draw = next_draw.replace(hour=20, minute=0, second=0, microsecond=0)
+            next_draw = next_draw.replace(hour=0, minute=0, second=0, microsecond=0)
 
             sleep_seconds = (next_draw - now).total_seconds()
             hours_until = sleep_seconds / 3600
@@ -280,12 +287,36 @@ async def run_sunday_lottery_draw():
                 except Exception as e:
                     print(f"⚠️ Could not post winner to socials: {e}")
 
-                # Credit winner's referral earnings (so they can withdraw)
+                # Try auto-payout if winner has withdrawal wallet set
                 try:
-                    await db.users.add_referral_earnings(winner_id, pot_ton)
-                    print(f"✅ Credited {pot_ton:.4f} TON to winner's account")
+                    winner = await db.users.get(winner_id)
+                    if winner and winner.withdrawal_wallet and pot_ton >= MIN_WITHDRAWAL_TON:
+                        # Auto-payout to winner's wallet
+                        try:
+                            await send_payout_transaction(
+                                winner.withdrawal_wallet,
+                                pot_ton,
+                                f"MemeSeal Lottery Win! {pot_stars} Stars"
+                            )
+                            print(f"✅ Auto-payout {pot_ton:.4f} TON to {winner.withdrawal_wallet[:20]}...")
+                            # Notify winner about auto-payout
+                            payout_msg = f"💸 **{pot_ton:.4f} TON** sent to your wallet!\nCheck: tonscan.org/address/{winner.withdrawal_wallet}"
+                            for send_bot in [memeseal_bot, bot]:
+                                if send_bot:
+                                    try:
+                                        await send_bot.send_message(winner_id, payout_msg, parse_mode="Markdown")
+                                        break
+                                    except Exception:
+                                        pass
+                        except Exception as payout_err:
+                            print(f"⚠️ Auto-payout failed, crediting account instead: {payout_err}")
+                            await db.users.add_referral_earnings(winner_id, pot_ton)
+                    else:
+                        # No wallet or pot too small - credit to account
+                        await db.users.add_referral_earnings(winner_id, pot_ton)
+                        print(f"✅ Credited {pot_ton:.4f} TON to winner's account (use /withdraw to claim)")
                 except Exception as e:
-                    print(f"⚠️ Could not credit winner: {e}")
+                    print(f"⚠️ Could not process winner payout: {e}")
             else:
                 print(f"❌ Lottery draw failed - no winner selected")
 
@@ -544,6 +575,94 @@ async def send_payout_transaction(destination: str, amount_ton: float, memo: str
     finally:
         if client:
             await client.close_all()
+
+
+async def seal_file_from_webhook(user_id: int, file_id: str, file_type: str, progress_msg):
+    """
+    Seal file triggered by TonAPI webhook payment detection.
+    Module-level function that can be called from webhook handler.
+    """
+    file_path = None
+    try:
+        # Determine which bot to use (prefer memeseal_bot)
+        active_bot = memeseal_bot if memeseal_bot else bot
+
+        # Download file
+        if file_type == "photo":
+            file = await active_bot.get_file(file_id)
+            file_path = f"downloads/{file_id}.jpg"
+        else:
+            file = await active_bot.get_file(file_id)
+            file_path = f"downloads/{file_id}"
+
+        os.makedirs("downloads", exist_ok=True)
+        await active_bot.download_file(file.file_path, file_path)
+        file_hash = hash_file(file_path)
+
+        # Seal to blockchain with retries
+        comment = f"MemeSeal:{file_hash[:16]}"
+        sealed = False
+
+        for attempt in range(5):
+            try:
+                await send_ton_transaction(comment)
+                sealed = True
+                break
+            except Exception as e:
+                print(f"⚠️ Webhook seal attempt {attempt+1}/5 failed: {e}")
+                await asyncio.sleep(5)
+
+        if sealed:
+            # Log and announce
+            await log_notarization(user_id, "webhook_ton_instant", file_hash, paid=True)
+
+            # Update progress message with success
+            if progress_msg:
+                try:
+                    await progress_msg.edit_text(
+                        f"✅ **SEALED TO BLOCKCHAIN!** 🐸\n\n"
+                        f"**Hash:** `{file_hash[:16]}...`\n\n"
+                        f"[View on TONScan](https://tonscan.org/) | "
+                        f"[Verify](https://notaryton.com/verify?hash={file_hash})\n\n"
+                        f"On TON forever. Receipts secured.",
+                        parse_mode="Markdown"
+                    )
+                except:
+                    pass
+
+            # Announce to socials
+            asyncio.create_task(announce_seal_to_socials(file_hash))
+            print(f"✅ Webhook seal success for user {user_id}: {file_hash[:16]}")
+        else:
+            if progress_msg:
+                try:
+                    await progress_msg.edit_text(
+                        f"⚠️ **Network Busy**\n\n"
+                        f"Seal failed after 5 attempts.\n"
+                        f"Your payment is credited - send the file again to retry!",
+                        parse_mode="Markdown"
+                    )
+                except:
+                    pass
+            print(f"❌ Webhook seal failed for user {user_id}")
+
+    except Exception as e:
+        print(f"❌ Webhook seal error: {e}")
+        if progress_msg:
+            try:
+                await progress_msg.edit_text(
+                    f"⚠️ **Error sealing**\n\n{str(e)[:100]}\n\nPlease try again.",
+                    parse_mode="Markdown"
+                )
+            except:
+                pass
+    finally:
+        if file_path:
+            try:
+                os.remove(file_path)
+            except:
+                pass
+
 
 async def resolve_ton_dns(domain: str) -> str:
     """Resolve .ton domain to TON address"""
@@ -2580,7 +2699,22 @@ async def tonapi_webhook(request: Request):
     This replaces the 30-second polling with instant detection!
     """
     try:
-        data = await request.json()
+        # Verify webhook signature if secret is configured
+        if TONAPI_WEBHOOK_SECRET:
+            body = await request.body()
+            signature = request.headers.get("X-TonAPI-Signature", "")
+            expected = hmac.new(
+                TONAPI_WEBHOOK_SECRET.encode(),
+                body,
+                hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(signature, expected):
+                print(f"⚠️ TonAPI webhook: Invalid signature")
+                return {"ok": False, "error": "Invalid signature"}
+            data = json.loads(body)
+        else:
+            data = await request.json()
+
         print(f"📡 TonAPI webhook received: {data.get('event_type', 'unknown')}")
 
         # TonAPI sends transaction events when our wallet receives payments
@@ -2697,25 +2831,51 @@ async def tonapi_webhook(request: Request):
                         await db.lottery.add_entry(user_id, amount_stars=1)
                         ticket_count = await db.lottery.count_user_entries(user_id)
 
-                        # Mark pending payment as completed
+                        # Check if user has pending file to auto-seal
                         if user_id in pending_ton_payments:
                             pending = pending_ton_payments[user_id]
 
-                            # Notify user instantly!
-                            for b in [bot, memeseal_bot]:
-                                if b:
-                                    try:
-                                        await b.send_message(
-                                            user_id,
-                                            f"🚨 **INSTANT PAYMENT DETECTED!** 🟢\n\n"
-                                            f"✅ {amount_ton:.4f} TON received\n"
-                                            f"✅ Credit added to your account\n\n"
-                                            f"🎰 **+1 LOTTERY TICKET!** (Total: {ticket_count})\n\n"
-                                            f"Now send me what you want sealed! 🐸",
-                                            parse_mode="Markdown"
-                                        )
-                                    except:
-                                        pass
+                            if pending.get("file_id"):
+                                # AUTO-SEAL: User already sent file, now payment received
+                                file_id = pending["file_id"]
+                                file_type = pending.get("file_type", "document")
+                                del pending_ton_payments[user_id]
+
+                                # Send progress message and trigger seal
+                                progress_msg = None
+                                for b in [memeseal_bot, bot]:
+                                    if b:
+                                        try:
+                                            progress_msg = await b.send_message(
+                                                user_id,
+                                                f"🚨 **PAYMENT DETECTED!** 🟢\n\n"
+                                                f"✅ {amount_ton:.4f} TON received\n"
+                                                f"⏳ Sealing your file now...",
+                                                parse_mode="Markdown"
+                                            )
+                                            break
+                                        except:
+                                            pass
+
+                                # Trigger seal using module-level function
+                                asyncio.create_task(seal_file_from_webhook(user_id, file_id, file_type, progress_msg))
+                                print(f"⚡ INSTANT: Auto-sealing file for user {user_id}")
+                            else:
+                                # Payment received but no file - just notify
+                                for b in [bot, memeseal_bot]:
+                                    if b:
+                                        try:
+                                            await b.send_message(
+                                                user_id,
+                                                f"🚨 **INSTANT PAYMENT DETECTED!** 🟢\n\n"
+                                                f"✅ {amount_ton:.4f} TON received\n"
+                                                f"✅ Credit added to your account\n\n"
+                                                f"🎰 **+1 LOTTERY TICKET!** (Total: {ticket_count})\n\n"
+                                                f"Now send me what you want sealed! 🐸",
+                                                parse_mode="Markdown"
+                                            )
+                                        except:
+                                            pass
                         else:
                             # Generic credit notification
                             for b in [bot, memeseal_bot]:
@@ -4542,6 +4702,40 @@ async def stats():
         "total_users": total_users,
         "total_notarizations": total_notarizations
     }
+
+
+# Admin endpoint to seed lottery pot (protected by secret)
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "memeseal-admin-2024")
+
+@app.post("/admin/seed-lottery")
+async def seed_lottery(amount_stars: int = 2500, secret: str = ""):
+    """Seed the lottery pot with fake entries (admin only)"""
+    if secret != ADMIN_SECRET:
+        return {"error": "Unauthorized"}
+
+    # Add entries to lottery (creates a "house" user if needed)
+    house_user_id = 1  # System/house user
+
+    try:
+        # Ensure house user exists
+        await db.users.get_or_create(house_user_id)
+
+        # Add lottery entry with specified amount
+        await db.lottery.add_entry(house_user_id, amount_stars)
+
+        # Get new pot size
+        pot_stars = await db.lottery.get_pot_size_stars()
+        pot_ton = await db.lottery.get_pot_size_ton()
+
+        return {
+            "success": True,
+            "added_stars": amount_stars,
+            "pot_stars": pot_stars,
+            "pot_ton": pot_ton
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
