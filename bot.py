@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import Update, LabeledPrice, PreCheckoutQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
@@ -60,6 +61,15 @@ memeseal_bot = Bot(token=MEMESEAL_BOT_TOKEN) if MEMESEAL_BOT_TOKEN else None
 memeseal_dp = Dispatcher() if MEMESEAL_BOT_TOKEN else None
 
 app = FastAPI()
+
+# CORS middleware for casino frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, restrict to your domains
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Global bot usernames (fetched on startup)
 BOT_USERNAME = "NotaryTON_bot"
