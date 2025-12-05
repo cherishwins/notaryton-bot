@@ -1,197 +1,251 @@
 # MemeSeal TON - Project Status
 
-*Last updated: December 4, 2025 (evening)*
+*Last updated: December 5, 2025*
 
 ---
 
 ## What Is This?
 
-**MemeSeal** is a Telegram bot that timestamps files on the TON blockchain. Users send a file, pay ~5 cents, and get permanent proof it existed at that moment.
-
-**It is NOT:**
-- A casino (though there's a lottery feature)
-- A mini app (pure Telegram bot, no web app yet)
-- A token (no $SEAL token... yet?)
+**MemeSeal** is a Telegram bot + casino mini app that:
+1. Timestamps files on TON blockchain (proof of existence)
+2. Runs casino games (slots, crash, roulette)
+3. Weekly lottery (20% of all revenue feeds pot)
 
 ---
 
-## What's Working Right Now
+## QUICK LINKS (Bookmark These)
 
-| Feature | Status | Notes |
+| What | URL |
+|------|-----|
+| **Bot** | https://t.me/MemeSealTON_bot |
+| **Casino Mini App** | https://memeseal-casino.vercel.app |
+| **Landing Page** | https://notaryton-bot.onrender.com |
+| **Render Dashboard** | https://dashboard.render.com/web/srv-d4i1p8khg0os738nldt0 |
+| **Lottery Pot API** | https://notaryton-bot.onrender.com/pot |
+| **Health Check** | https://notaryton-bot.onrender.com/health |
+
+---
+
+## WHAT'S WORKING (Makes Money) ✅
+
+| Feature | Status | Revenue |
+|---------|--------|---------|
+| **Seal Service** | ✅ LIVE | 1 Star (~$0.02) per seal |
+| **Unlimited Subscription** | ✅ LIVE | 20 Stars (~$0.40) per month |
+| **Pay with Telegram Stars** | ✅ LIVE | Goes to your Telegram balance |
+| **Pay with TON** | ✅ LIVE | 0.015 TON per seal |
+| **Lottery System** | ✅ LIVE | 20% of fees → weekly pot |
+| **Referral System** | ✅ LIVE | 5% commission |
+
+---
+
+## WHAT'S BUILT BUT NOT MONETIZED YET ⚠️
+
+| Feature | Status | Issue |
 |---------|--------|-------|
-| **Send file, get seal** | ✅ Working | Core feature |
-| **Pay with Telegram Stars** | ✅ Working | 1 Star = 1 seal |
-| **Pay with TON** | ✅ Working | 0.015 TON = 1 seal |
-| **Unlimited subscription** | ✅ Working | 15 Stars or 0.3 TON/month |
-| **Instant payment detection** | ✅ Working | TonAPI webhooks + HMAC verification |
-| **Auto-seal on payment** | ✅ Working | Webhook triggers seal automatically |
-| **Referral system** | ✅ Working | 5% commission |
-| **Withdrawal to TON wallet** | ✅ Working | /withdraw command |
-| **Multi-language** | ✅ Working | EN, RU, ZH |
-| **Lottery tickets** | ✅ Working | Every seal = 1 ticket |
-| **Lottery pot display** | ✅ Working | /pot shows current pot |
-| **Lottery draw** | ✅ Working | Sundays midnight UTC, auto-payout |
-| **X/Twitter auto-post** | ✅ Working | Seals + lottery winners post to X |
-| **Landing page** | ✅ Working | notaryton.com |
-| **Verification page** | ✅ Working | /verify endpoint |
-| **REST API** | ✅ Working | /api/v1/notarize, /batch, /verify |
+| **Casino Mini App** | ✅ DEPLOYED | Demo mode - fake balance |
+| **Slots Game** | ✅ BUILT | No real money integration |
+| **Crash Game** | ✅ BUILT | No real money integration |
+| **Roulette Game** | ✅ BUILT | No real money integration |
+| **TON Wallet Connect** | ✅ BUILT | Connected but no deposits |
+
+**To make casino real money:** Need to add Stars purchase for chips + database balance storage.
 
 ---
 
-## What Was Just Fixed (Dec 4, 2025)
-
-1. **Lottery draw scheduler** - Runs every Sunday at midnight UTC. Auto-pays winners who have withdrawal wallet set.
-
-2. **TonAPI webhook security** - Added HMAC signature verification for webhook requests.
-
-3. **Auto-seal on payment** - When webhook detects TON payment, automatically seals the pending file.
-
-4. **Memo cleanup** - Expired payment memos are now cleaned up every 5 minutes.
-
-5. **Code modularization** - Extracted `config.py` and `utils/` package for cleaner architecture.
-
-### Previously Fixed
-- Wallet version (WalletV5R1)
-- TonAPI instant payment detection
-- X/Twitter auto-posting
-- Honest UX (no fake success messages)
-
----
-
-## The Lottery (Not a Casino)
-
-- **How it works:** Every seal = 1 lottery ticket
-- **Pot:** 20% of seal fees go to pot
-- **Draw:** Sundays at midnight UTC
-- **Winner:** Random ticket wins entire pot
-- **Current pot:** Check with /pot command
-
-This is NOT a casino - no betting, no games. Just a raffle for people who use the seal service.
-
----
-
-## Bots
-
-| Bot | Username | Purpose |
-|-----|----------|---------|
-| **MemeSeal** | @MemeSealTON_bot | Main bot (degen branding) |
-| **NotaryTON** | @NotaryTON_bot | Professional branding |
-
-Both bots share the same database and wallet.
-
----
-
-## Tech Stack
-
-- **Hosting:** Render.com (auto-deploys from GitHub)
-- **Database:** Render PostgreSQL
-- **Blockchain:** TON (via pytoniq + TonAPI webhooks)
-- **Payments:** Telegram Stars + native TON
-- **Domain:** notaryton.com
-
----
-
-## What's NOT Done Yet
-
-| Feature | Priority | Notes |
-|---------|----------|-------|
-| **GetBlock fallback** | Medium | Backup RPC if liteservers slow |
-| **Telegram Mini App** | Low | Rich UI for verification |
-| **OpenTimestamps** | Low | Bitcoin-anchored timestamps |
-| **OriginStamp** | Low | Legal-grade certificates |
-| **Analytics dashboard** | Low | Track seals, revenue, users |
-
----
-
-## Revenue Model
+## PROJECT STRUCTURE
 
 ```
-Per seal:     1 Star (~$0.02) or 0.015 TON (~$0.05)
-Subscription: 15 Stars/month or 0.3 TON/month
-Referrals:    5% commission to referrer
-Lottery:      20% of fees go to pot (winner takes all)
+/ton/
+├── notaryton-bot/              ← MAIN BACKEND (Render)
+│   ├── bot.py                  ← Bot handlers, payments, API (5000+ lines)
+│   ├── config.py               ← Environment variables
+│   ├── database.py             ← PostgreSQL operations
+│   ├── social.py               ← Twitter/X auto-posting
+│   ├── static/                 ← Images, favicons
+│   │   ├── favicon.ico         ← Matrix frog favicon
+│   │   ├── memeseal_icon.png   ← Ad creative (square)
+│   │   ├── memeseal_banner.png ← Ad creative (wide)
+│   │   └── casino_interior.png ← Casino promo image
+│   ├── AD_CAMPAIGN_GUIDE.md    ← How to run Telegram ads
+│   ├── STATUS.md               ← This file
+│   └── tests/                  ← pytest suite
+│
+└── memeseal-casino/            ← CASINO FRONTEND (Vercel)
+    ├── src/
+    │   ├── App.jsx             ← Main casino lobby
+    │   ├── games/
+    │   │   ├── SlotsGame.jsx   ← Politician slots
+    │   │   ├── CrashGame.jsx   ← Frog rocket
+    │   │   └── RouletteGame.jsx← Election roulette
+    │   └── components/         ← UI components
+    ├── public/                 ← Favicons
+    └── index.html              ← Entry point
 ```
 
 ---
 
-## Key Files
+## DEPLOYMENTS
 
-| File | What It Does |
-|------|-------------|
-| `bot.py` | Main bot code (5,000 lines - handlers, payments, API) |
-| `config.py` | All environment variables and constants |
-| `database.py` | PostgreSQL operations |
-| `social.py` | X/Twitter + channel posting |
-| `utils/` | Extracted utilities (i18n, hashing, memo) |
-| `tests/` | pytest test suite (21 tests, all passing) |
-| `.env` | Your secrets (never commit!) |
-| `.env.template` | Template for secrets |
-| `.claude/CLAUDE.md` | AI working style guide |
+| Service | Platform | URL | Auto-Deploy |
+|---------|----------|-----|-------------|
+| Bot + API + Landing | Render | notaryton-bot.onrender.com | Yes (GitHub push) |
+| Casino Mini App | Vercel | memeseal-casino.vercel.app | Yes (GitHub push) |
 
 ---
 
-## Environment Variables (Render)
+## BOT COMMANDS
 
-These are set in Render dashboard:
-
-| Variable | Status |
-|----------|--------|
-| BOT_TOKEN | ✅ Set |
-| MEMESEAL_BOT_TOKEN | ✅ Set |
-| TON_WALLET_SECRET | ✅ Set |
-| SERVICE_TON_WALLET | ✅ Set |
-| DATABASE_URL | ✅ Set |
-| WEBHOOK_URL | ✅ Set |
-| TONAPI_KEY | ✅ Set |
-| TONAPI_WEBHOOK_SECRET | ⚠️ Optional (for HMAC verification) |
-| TWITTER_API_KEY | ✅ Set |
-| TWITTER_API_SECRET | ✅ Set |
-| TWITTER_ACCESS_TOKEN | ✅ Set |
-| TWITTER_ACCESS_TOKEN_SECRET | ✅ Set |
+| Command | What It Does |
+|---------|--------------|
+| `/start` | Welcome message + PLAY CASINO button |
+| `/casino` | Open casino mini app |
+| `/seal` | Instructions to seal a file |
+| `/verify` | Check if a hash is sealed |
+| `/unlimited` | Subscribe for unlimited seals |
+| `/pot` | Show lottery pot status |
+| `/mytickets` | Show your lottery tickets |
+| `/referral` | Get your referral link |
+| `/withdraw` | Withdraw earnings to TON wallet |
 
 ---
 
-## Quick Commands
+## REVENUE FLOW
+
+```
+USER ACTION                    YOU GET
+─────────────────────────────────────────
+Seals 1 file (1 Star)    →    $0.02
+Buys unlimited (20 Stars)→    $0.40
+Referred user seals      →    5% of their payments
+
+LOTTERY:
+20% of all payments → Weekly pot
+Winner takes all (Sunday 8pm UTC)
+```
+
+---
+
+## BRANDING ASSETS
+
+| File | Use For |
+|------|---------|
+| `static/memeseal_icon.png` | Telegram Ads (square) |
+| `static/memeseal_banner.png` | Twitter/landing (wide) |
+| `static/favicon.ico` | Browser tabs |
+| `static/casino_interior.png` | Casino promo |
+| `static/lottery_win.png` | Winner announcements |
+
+---
+
+## ENVIRONMENT VARIABLES (Render)
+
+| Variable | Status | What It Does |
+|----------|--------|--------------|
+| BOT_TOKEN | ✅ Set | NotaryTON bot |
+| MEMESEAL_BOT_TOKEN | ✅ Set | MemeSeal bot |
+| TON_WALLET_SECRET | ✅ Set | 24-word mnemonic |
+| SERVICE_TON_WALLET | ✅ Set | Receiving wallet |
+| DATABASE_URL | ✅ Set | PostgreSQL connection |
+| WEBHOOK_URL | ✅ Set | Bot webhook URL |
+| TONAPI_KEY | ✅ Set | Payment detection |
+| TWITTER_* | ✅ Set | Auto-posting |
+
+---
+
+## WHAT'S LEFT TO BUILD
+
+### High Priority (Revenue)
+- [ ] Casino real money (Stars → chips → play → cashout)
+- [ ] "Buy Chips" button that creates Stars invoice
+- [ ] Database-backed balance (not local state)
+
+### Medium Priority (Growth)
+- [ ] Domain (memeseal.io or memeseal.ton)
+- [ ] More ad creatives / variations
+- [ ] Telegram channel content
+
+### Low Priority (Polish)
+- [ ] GetBlock RPC fallback
+- [ ] Analytics dashboard
+- [ ] More games (blackjack, dice)
+
+---
+
+## QUICK COMMANDS
 
 ```bash
-# Run locally
-python bot.py
+# Deploy bot (auto on push)
+git push origin main
 
-# Check wallet
-python -c "... wallet check script ..."
+# Deploy casino manually
+cd memeseal-casino && vercel --prod
 
-# Deploy
-git push origin main  # Auto-deploys to Render
+# Check bot health
+curl https://notaryton-bot.onrender.com/health
+
+# Check lottery pot
+curl https://notaryton-bot.onrender.com/pot
+
+# Run tests
+pytest tests/ -v
 ```
 
 ---
 
-## Links
+## TELEGRAM ADS
 
-- **Live bot:** https://t.me/MemeSealTON_bot
-- **Website:** https://notaryton.com
-- **Render dashboard:** https://dashboard.render.com/web/srv-d4i1p8khg0os738nldt0
-- **GitHub:** https://github.com/cherishwins/notaryton-bot
-- **TonAPI console:** https://tonconsole.com
-
----
-
-## Next Steps
-
-1. **Continue modularization** - Split bot.py into handlers/, payments/, api/
-2. **Add GetBlock fallback** - Backup RPC for reliability
-3. **Marketing** - Share in TON groups, get users
-4. **Monitor first lottery draw** - Sunday midnight UTC
+See `AD_CAMPAIGN_GUIDE.md` for:
+- Exact ad copy to paste
+- Image to upload
+- Channels to target
+- ROI estimates
 
 ---
 
-## Support
+## IF SOMETHING BREAKS
 
-If something breaks:
-1. Check Render logs
-2. Check this STATUS.md
-3. Ask Claude with context from `.claude/CLAUDE.md`
+1. **Bot not responding?**
+   - Check: https://notaryton-bot.onrender.com/health
+   - Check Render logs in dashboard
+
+2. **Casino blank page?**
+   - Redeploy: `cd memeseal-casino && vercel --prod`
+   - Check Vercel dashboard
+
+3. **Payments not working?**
+   - Check TonAPI webhook in Render logs
+   - Verify TONAPI_KEY is set
+
+4. **Need help?**
+   - Read `.claude/CLAUDE.md` for context
+   - This file has all the links
 
 ---
 
-*Bot is running. All core features working. Next: modularization + marketing.*
+## CURRENT STATS
+
+Check live at: https://notaryton-bot.onrender.com/pot
+
+```
+Lottery pot: ~500 Stars
+Total users: 3
+Total seals: 1
+Next draw: Sunday 8pm UTC
+```
+
+---
+
+## SOCIALS
+
+| Platform | Handle |
+|----------|--------|
+| Telegram Bot | @MemeSealTON_bot |
+| Telegram Channel | @MemeSealTON |
+| Twitter/X | @MemeSealTON |
+
+---
+
+*Status: LIVE and ready for ads. Casino is demo-only until chips system built.*
+
+*🐸💎 Diamond eyes are watching*
