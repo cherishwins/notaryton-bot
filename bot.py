@@ -3168,14 +3168,221 @@ async def memescan_landing():
             <p>Built for degens, by degens. Free during beta.</p>
             <p style="margin-top:10px">
                 <a href="https://t.me/MemeScanTON_bot">Telegram Bot</a> ·
-                <a href="/">MemeSeal</a> ·
-                <a href="https://ton.org">TON Blockchain</a>
+                <a href="https://x.com/MemeScanTON">Twitter</a> ·
+                <a href="/memescan/litepaper">Litepaper</a> ·
+                <a href="https://ton.org">TON</a>
             </p>
         </footer>
     </div>
 </body>
 </html>
 """
+
+
+@app.get("/memescan/litepaper", response_class=HTMLResponse)
+async def memescan_litepaper():
+    """MemeScan Litepaper - readable whitepaper"""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MemeScan Litepaper - Bloomberg for Meme Coins</title>
+    <meta name="description" content="MemeScan litepaper: How we're building the Bloomberg terminal for TON meme coins.">
+    <meta property="og:title" content="MemeScan Litepaper">
+    <meta property="og:description" content="Bloomberg terminal for meme coins. Free. How it works.">
+    <meta property="og:image" content="https://notaryton.com/static/memescan/og-image.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" href="/static/memescan/favicon.ico">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a0a;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.7;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #00ff00;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-family: 'SF Mono', monospace;
+        }
+        h2 {
+            color: #00ff00;
+            font-size: 1.5rem;
+            margin: 40px 0 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #222;
+        }
+        h3 { color: #00ffff; margin: 25px 0 15px; }
+        p { margin: 15px 0; color: #ccc; }
+        a { color: #00ff00; }
+        code {
+            background: #111;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', monospace;
+            color: #ff00ff;
+        }
+        pre {
+            background: #111;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 20px 0;
+            border-left: 3px solid #00ff00;
+        }
+        pre code { background: none; padding: 0; }
+        .highlight { color: #00ff00; font-weight: bold; }
+        .warning { color: #ffaa00; }
+        .danger { color: #ff4444; }
+        ul, ol { margin: 15px 0 15px 25px; color: #ccc; }
+        li { margin: 8px 0; }
+        .header {
+            text-align: center;
+            margin-bottom: 50px;
+            padding-bottom: 30px;
+            border-bottom: 1px solid #222;
+        }
+        .subtitle { color: #666; font-size: 1.1rem; }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 30px;
+            color: #666;
+            text-decoration: none;
+        }
+        .back-link:hover { color: #00ff00; }
+        .cta {
+            background: linear-gradient(135deg, #00ff00 0%, #00cc00 100%);
+            color: #000;
+            padding: 15px 30px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            display: inline-block;
+            margin: 20px 0;
+        }
+        .phase {
+            background: #111;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin: 10px 0;
+            border-left: 3px solid #00ff00;
+        }
+        .phase.current { border-color: #00ffff; background: #0a1a1a; }
+        .phase-title { color: #00ff00; font-weight: bold; }
+        .phase.current .phase-title { color: #00ffff; }
+        hr { border: none; border-top: 1px solid #222; margin: 40px 0; }
+        .footer {
+            text-align: center;
+            margin-top: 60px;
+            padding-top: 30px;
+            border-top: 1px solid #222;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/memescan" class="back-link">← Back to MemeScan</a>
+
+        <div class="header">
+            <h1>MemeScan Litepaper</h1>
+            <p class="subtitle">Bloomberg terminal for meme coins. Free.</p>
+        </div>
+
+        <h2>The Problem</h2>
+        <p><strong>You're aping into meme coins blind.</strong></p>
+        <ul>
+            <li>Dev rugged? You find out after.</li>
+            <li>Whale dumping? You're the exit liquidity.</li>
+            <li>New launch? You heard about it 3 hours late.</li>
+        </ul>
+        <p>The information exists. It's just scattered across 47 Telegram groups, Discord servers, and some guy's Twitter thread you'll never find.</p>
+
+        <h2>The Solution</h2>
+        <p><span class="highlight">MemeScan is Bloomberg Terminal for meme coins.</span></p>
+        <p>One bot. All the alpha. Free.</p>
+        <pre><code>/trending   → Top movers right now
+/new        → Launches in the last hour
+/check      → Safety score any token
+/whale      → Big wallet movements</code></pre>
+
+        <h2>How It Works</h2>
+        <p>We aggregate data from:</p>
+        <ul>
+            <li><strong>STON.fi</strong> - Real-time DEX data, pools, volume</li>
+            <li><strong>TonAPI</strong> - Holder distribution, wallet analysis</li>
+            <li><strong>GeckoTerminal</strong> - Price feeds, liquidity depth</li>
+        </ul>
+        <p>Then we run it through safety analysis:</p>
+        <ul>
+            <li>Dev wallet % (<span class="warning">>10% = warning</span>)</li>
+            <li>Top 10 holder concentration</li>
+            <li>Liquidity depth vs market cap</li>
+            <li>Contract verification status</li>
+        </ul>
+        <p>You get a simple score: <span class="highlight">SAFE</span> / <span class="warning">CAUTION</span> / <span class="danger">DANGER</span></p>
+
+        <h2>Why Free?</h2>
+        <p>Because the real money is in:</p>
+        <ol>
+            <li><strong>Premium alerts</strong> (coming) - Whale movements, insider wallets, launch sniping</li>
+            <li><strong>API access</strong> (coming) - For traders who want raw data</li>
+            <li><strong>Ad slots</strong> (coming) - Projects can pay for visibility</li>
+        </ol>
+        <p>Free users = distribution = network effects = moat.</p>
+
+        <h2>The Team</h2>
+        <p>Anonymous. Ships fast. Judges slow.</p>
+        <p>We're degens who got tired of getting rugged. Built this for ourselves. Now sharing it.</p>
+
+        <h2>Roadmap</h2>
+        <div class="phase current">
+            <span class="phase-title">Phase 1: Data (NOW)</span>
+            <p>Trending tokens, new launches, safety scores, basic whale tracking</p>
+        </div>
+        <div class="phase">
+            <span class="phase-title">Phase 2: Alerts (Q1 2025)</span>
+            <p>Real-time Telegram notifications, custom watchlists, whale wallet tracking</p>
+        </div>
+        <div class="phase">
+            <span class="phase-title">Phase 3: Alpha (Q2 2025)</span>
+            <p>Insider wallet detection, launch sniping signals, cross-chain expansion</p>
+        </div>
+        <div class="phase">
+            <span class="phase-title">Phase 4: Terminal (Q3 2025)</span>
+            <p>Full web dashboard, portfolio tracking, P&L analytics</p>
+        </div>
+
+        <h2>Token?</h2>
+        <p><strong>No token. No presale. No Discord mod asking for your seed phrase.</strong></p>
+        <p>If we launch a token, you'll hear about it on MemeScan first.</p>
+
+        <hr>
+
+        <div style="text-align: center;">
+            <a href="https://t.me/MemeScanTON_bot" class="cta">Launch Terminal →</a>
+        </div>
+
+        <div class="footer">
+            <p>Built on TON. For degens, by degens.</p>
+            <p style="margin-top: 15px;">
+                <a href="https://t.me/MemeScanTON_bot">Telegram</a> ·
+                <a href="https://x.com/MemeScanTON">Twitter</a> ·
+                <a href="/memescan">Home</a>
+            </p>
+            <p style="margin-top: 15px; font-size: 0.9rem;">Last updated: December 2025</p>
+        </div>
+    </div>
+</body>
+</html>"""
 
 
 @app.get("/privacy", response_class=HTMLResponse)
