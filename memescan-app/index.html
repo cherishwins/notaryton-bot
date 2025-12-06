@@ -12,7 +12,23 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
     <!-- TG Analytics -->
-    <script src="https://tganalytics.xyz/index.js" async></script>
+    <script
+      async
+      src="https://tganalytics.xyz/index.js"
+      onload="initTgAnalytics()"
+      type="text/javascript"
+    ></script>
+    <script>
+      function initTgAnalytics() {
+        if (window.telegramAnalytics) {
+          window.telegramAnalytics.init({
+            token: 'eyJhcHBfbmFtZSI6Ik1lbWVTY2FuIiwiYXBwX3VybCI6Imh0dHBzOi8vdC5tZS9NZW1lU2NhblRPTl9ib3QvdGVybWluYWwiLCJhcHBfaWQiOjE3NjkzfQ==',
+            appName: 'MemeScan',
+          });
+          console.log('✅ TG Analytics initialized');
+        }
+      }
+    </script>
 
     <!-- Terminal Font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">

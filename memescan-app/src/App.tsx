@@ -106,22 +106,13 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize Telegram WebApp and Analytics
+  // Initialize Telegram WebApp
   useEffect(() => {
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.ready();
       window.Telegram.WebApp.expand();
-
-      // Initialize TG Analytics
-      // @ts-expect-error TG Analytics global
-      if (window.telegramAnalytics) {
-        // @ts-expect-error TG Analytics global
-        window.telegramAnalytics.init({
-          token: import.meta.env.VITE_TG_ANALYTICS_TOKEN || '',
-          appName: 'MemeScan',
-        });
-      }
     }
+    // TG Analytics is initialized in index.html via onload callback
   }, []);
 
   // Fetch data based on active tab
