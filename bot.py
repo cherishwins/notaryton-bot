@@ -3386,6 +3386,114 @@ async def memescan_litepaper():
 </html>"""
 
 
+# ========================
+# MEMESCAN REST API - For Mini App
+# ========================
+
+@app.get("/api/v1/memescan/trending")
+async def api_memescan_trending(limit: int = 10):
+    """Get trending meme coins."""
+    try:
+        client = get_memescan_client()
+        tokens = await client.get_trending(limit=min(limit, 20))
+        return {
+            "success": True,
+            "tokens": [
+                {
+                    "address": t.address,
+                    "symbol": t.symbol,
+                    "name": t.name,
+                    "price_usd": t.price_usd,
+                    "price_change_24h": t.price_change_24h,
+                    "volume_24h_usd": t.volume_24h_usd,
+                    "liquidity_usd": t.liquidity_usd,
+                }
+                for t in tokens
+            ],
+        }
+    except Exception as e:
+        print(f"❌ MemeScan trending error: {e}")
+        return {"success": False, "error": str(e), "tokens": []}
+
+
+@app.get("/api/v1/memescan/new")
+async def api_memescan_new(limit: int = 10):
+    """Get newly launched tokens."""
+    try:
+        client = get_memescan_client()
+        tokens = await client.get_new_launches(limit=min(limit, 20))
+        return {
+            "success": True,
+            "tokens": [
+                {
+                    "address": t.address,
+                    "symbol": t.symbol,
+                    "name": t.name,
+                    "price_usd": t.price_usd,
+                    "liquidity_usd": t.liquidity_usd,
+                    "created_at": t.created_at.isoformat() if t.created_at else None,
+                }
+                for t in tokens
+            ],
+        }
+    except Exception as e:
+        print(f"❌ MemeScan new error: {e}")
+        return {"success": False, "error": str(e), "tokens": []}
+
+
+@app.get("/api/v1/memescan/check/{address}")
+async def api_memescan_check(address: str):
+    """Analyze token safety."""
+    try:
+        # Validate address format
+        if not (address.startswith("EQ") or address.startswith("UQ") or address.startswith("0:")):
+            return {"success": False, "error": "Invalid TON address format"}
+
+        client = get_memescan_client()
+        token = await client.analyze_token_safety(address)
+        return {
+            "success": True,
+            "token": {
+                "address": token.address,
+                "symbol": token.symbol,
+                "name": token.name,
+                "holder_count": token.holder_count,
+                "dev_wallet_percent": token.dev_wallet_percent,
+                "safety_level": token.safety_level.value,
+                "safety_warnings": token.safety_warnings,
+            },
+        }
+    except Exception as e:
+        print(f"❌ MemeScan check error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/memescan/pools")
+async def api_memescan_pools(limit: int = 10):
+    """Get top liquidity pools."""
+    try:
+        client = get_memescan_client()
+        pools = await client.stonfi.get_trending_pools(limit=min(limit, 20))
+        return {
+            "success": True,
+            "pools": [
+                {
+                    "address": p.address,
+                    "dex": p.dex,
+                    "pair": f"{p.token0_symbol}/{p.token1_symbol}",
+                    "token0_symbol": p.token0_symbol,
+                    "token1_symbol": p.token1_symbol,
+                    "liquidity_usd": p.liquidity_usd,
+                    "volume_24h": p.volume_24h,
+                }
+                for p in pools
+            ],
+        }
+    except Exception as e:
+        print(f"❌ MemeScan pools error: {e}")
+        return {"success": False, "error": str(e), "pools": []}
+
+
 @app.get("/privacy", response_class=HTMLResponse)
 async def privacy_policy():
     """Privacy Policy"""
