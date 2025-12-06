@@ -65,7 +65,7 @@ GET /api/v1/memescan/pools     - Top STON.fi pools
 ## Remaining Tasks
 
 1. [x] Build MemeScan Mini App - DONE!
-2. [x] Deploy to Vercel - https://memescan-app.vercel.app
+2. [x] Deploy to Vercel - https://memescan-ton.vercel.app
 3. [ ] Register MemeScan on TON Builders with Mini App link
 4. [ ] Create MemeScan-specific analytics key
 5. [ ] Post TON Nest intro in Founders Chat
@@ -79,7 +79,7 @@ GET /api/v1/memescan/pools     - Top STON.fi pools
 
 | Resource | URL |
 |----------|-----|
-| MemeScan Mini App | https://memescan-app.vercel.app |
+| MemeScan Mini App | https://memescan-ton.vercel.app |
 | MemeSeal Bot | https://t.me/MemeSealTON_bot |
 | MemeScan Bot | https://t.me/MemeScanTON_bot |
 | Website | https://notaryton.com |
@@ -100,7 +100,7 @@ Hey everyone! I'm Jesse, solo founder of MemeSeal + MemeScan.
 Status: Both live on mainnet
 - @MemeSealTON_bot
 - @MemeScanTON_bot
-- https://memescan-app.vercel.app (Mini App)
+- https://memescan-ton.vercel.app (Mini App)
 - notaryton.com
 
 Looking to scale user acquisition and connect with TON builders.
