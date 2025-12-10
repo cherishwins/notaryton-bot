@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NotaryTON Dashboard</title>
+    <script src="https://cloud.umami.is/script.js" data-website-id="b0430a5c-a5f9-4b36-9498-5cd9eb662403" defer></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 {
+            text-align: center;
+            font-size: 2.5rem;
+            margin-bottom: 30px;
+            background: linear-gradient(90deg, #00d4ff, #0099ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 40px rgba(0,212,255,0.2);
+        }
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(90deg, #00d4ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .stat-label {
+            color: #888;
+            font-size: 0.9rem;
+            margin-top: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .section {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .section h2 {
+            font-size: 1.3rem;
+            margin-bottom: 16px;
+            color: #00d4ff;
+        }
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .table th, .table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .table th { color: #888; font-weight: 500; }
+        .hash { font-family: monospace; color: #00ff88; font-size: 0.85rem; }
+        .badge {
+            background: linear-gradient(90deg, #00d4ff, #0099ff);
+            color: #000;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .footer {
+            text-align: center;
+            color: #666;
+            margin-top: 40px;
+            padding: 20px;
+        }
+        .footer a { color: #00d4ff; text-decoration: none; }
+        @media (max-width: 600px) {
+            .stat-value { font-size: 1.8rem; }
+            h1 { font-size: 1.8rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>NotaryTON Dashboard</h1>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">{{ "{:,}".format(total_users) }}</div>
+                <div class="stat-label">Total Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ "{:,}".format(total_notarizations) }}</div>
+                <div class="stat-label">Total Seals</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ "{:,}".format(notarizations_24h) }}</div>
+                <div class="stat-label">Seals (24h)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ "{:,}".format(users_24h) }}</div>
+                <div class="stat-label">New Users (24h)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ "{:.2f}".format(total_revenue) }}</div>
+                <div class="stat-label">Revenue (TON)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ "{:,}".format(total_referrals) }}</div>
+                <div class="stat-label">Referrals</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Top Referrers</h2>
+            <table class="table">
+                <tr><th>User ID</th><th>Referrals</th><th>Earnings</th></tr>
+                {% if top_referrers %}
+                    {% for r in top_referrers %}
+                    <tr><td>{{ r[0] }}</td><td>{{ r[1] }}</td><td>{{ "{:.4f}".format(r[2]) }} TON</td></tr>
+                    {% endfor %}
+                {% else %}
+                <tr><td colspan="3" style="color:#666">No referrers yet</td></tr>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Recent Seals</h2>
+            <table class="table">
+                <tr><th>Hash</th><th>Time</th></tr>
+                {% if recent_seals %}
+                    {% for s in recent_seals %}
+                    <tr><td class="hash">{{ s[0][:16] }}...</td><td>{{ s[1] }}</td></tr>
+                    {% endfor %}
+                {% else %}
+                <tr><td colspan="2" style="color:#666">No seals yet</td></tr>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="footer">
+            <p>Powered by <a href="https://t.me/NotaryTON_bot">@NotaryTON_bot</a> | <a href="/">Home</a> | <a href="/stats">API</a></p>
+        </div>
+    </div>
+</body>
+</html>

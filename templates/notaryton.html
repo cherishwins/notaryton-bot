@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NotaryTON - Blockchain Notarization on TON</title>
+    <meta name="description" content="Seal any file on TON blockchain. Instant. Immutable. Forever. Starting at 1 Star or 0.015 TON.">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://notaryton.com/">
+    <meta property="og:title" content="NotaryTON - Blockchain Notarization on TON">
+    <meta property="og:description" content="Seal any file on TON blockchain. Instant. Immutable. Forever. Starting at 1 Star or 0.015 TON.">
+    <meta property="og:image" content="https://notaryton.com/static/logo.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:site_name" content="NotaryTON">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:url" content="https://notaryton.com/">
+    <meta name="twitter:title" content="NotaryTON - Blockchain Notarization on TON">
+    <meta name="twitter:description" content="Seal any file on TON blockchain. Instant. Immutable. Forever.">
+    <meta name="twitter:image" content="https://notaryton.com/static/logo.png">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+
+    <!-- Analytics -->
+    <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
+    <!-- End Analytics -->
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(180deg, #f0f4f8 0%, #d9e2ec 100%);
+            color: #1a1a2e;
+            min-height: 100vh;
+        }
+        .hero {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            text-align: center;
+        }
+        .logo-img {
+            width: 280px;
+            height: auto;
+            margin-bottom: 20px;
+            filter: drop-shadow(0 10px 30px rgba(0,100,200,0.2));
+        }
+        h1 {
+            font-size: 2.8rem;
+            margin-bottom: 15px;
+            color: #0a4d8c;
+        }
+        .tagline {
+            font-size: 1.4rem;
+            color: #555;
+            margin-bottom: 40px;
+            max-width: 500px;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 25px;
+            max-width: 900px;
+            margin: 0 auto 50px;
+            padding: 0 20px;
+        }
+        .feature {
+            background: white;
+            padding: 25px;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            text-align: left;
+        }
+        .feature h3 {
+            font-size: 1.2rem;
+            margin-bottom: 10px;
+            color: #0a4d8c;
+        }
+        .feature p {
+            color: #666;
+            line-height: 1.5;
+        }
+        .cta-section {
+            background: linear-gradient(135deg, #0a4d8c 0%, #1a7fd4 100%);
+            padding: 60px 20px;
+            text-align: center;
+        }
+        .cta-section h2 {
+            color: white;
+            font-size: 2rem;
+            margin-bottom: 20px;
+        }
+        .cta-section p {
+            color: rgba(255,255,255,0.9);
+            font-size: 1.2rem;
+            margin-bottom: 30px;
+        }
+        .cta {
+            display: inline-block;
+            background: white;
+            color: #0a4d8c;
+            padding: 18px 50px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-size: 1.2rem;
+            font-weight: 700;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .cta:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.2);
+        }
+        .pricing {
+            padding: 60px 20px;
+            text-align: center;
+            background: white;
+        }
+        .pricing h2 {
+            font-size: 2rem;
+            margin-bottom: 40px;
+            color: #0a4d8c;
+        }
+        .price-cards {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+        .price-card {
+            background: #f8fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 20px;
+            padding: 35px;
+            width: 280px;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .price-card:hover {
+            transform: translateY(-5px);
+            border-color: #0a4d8c;
+        }
+        .price-card h3 {
+            font-size: 1.3rem;
+            margin-bottom: 15px;
+            color: #333;
+        }
+        .price-card .price {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #0a4d8c;
+            margin-bottom: 15px;
+        }
+        .price-card .price small {
+            font-size: 1rem;
+            color: #888;
+        }
+        .price-card ul {
+            list-style: none;
+            text-align: left;
+            margin-top: 20px;
+        }
+        .price-card li {
+            padding: 8px 0;
+            color: #555;
+        }
+        .price-card li:before {
+            content: "✓ ";
+            color: #22c55e;
+            font-weight: bold;
+        }
+        footer {
+            background: #1a1a2e;
+            color: #888;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        footer a {
+            color: #00d4ff;
+            text-decoration: none;
+        }
+        .api-badge {
+            display: inline-block;
+            background: #e0f2fe;
+            color: #0369a1;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <img src="/static/logo.png" alt="NotaryTON Logo" class="logo-img">
+        <h1>NotaryTON</h1>
+        <p class="tagline">Seal any file on TON blockchain. Instant. Immutable. Forever.</p>
+        <a href="https://t.me/{{ bot_username }}" class="cta">Start Notarizing</a>
+        <span class="api-badge">Public API Available</span>
+    </div>
+
+    <div class="features">
+        <div class="feature">
+            <h3>Instant Blockchain Proof</h3>
+            <p>Get immutable on-chain proof in seconds. Your files are hashed and sealed on TON forever.</p>
+        </div>
+        <div class="feature">
+            <h3>Auto-Notarize in Groups</h3>
+            <p>Add the bot to your Telegram group. Every memecoin launch gets automatically notarized.</p>
+        </div>
+        <div class="feature">
+            <h3>Public Verification</h3>
+            <p>Anyone can verify a notarization. No account needed. Just paste the hash.</p>
+        </div>
+        <div class="feature">
+            <h3>Developer API</h3>
+            <p>Integrate notarization into your dApp, DEX, or deploy bot with our simple REST API.</p>
+        </div>
+    </div>
+
+    <div class="pricing">
+        <h2>Simple Pricing</h2>
+        <div class="price-cards">
+            <div class="price-card">
+                <h3>Pay As You Go</h3>
+                <div class="price">1 Star <small>or 0.015 TON</small></div>
+                <ul>
+                    <li>Single notarization</li>
+                    <li>Instant on-chain proof</li>
+                    <li>Permanent verification URL</li>
+                    <li>Works with any file</li>
+                </ul>
+            </div>
+            <div class="price-card" style="border-color: #0a4d8c;">
+                <h3>Monthly Unlimited</h3>
+                <div class="price">20 Stars <small>or 0.3 TON</small></div>
+                <ul>
+                    <li>Unlimited notarizations</li>
+                    <li>API access included</li>
+                    <li>Batch operations</li>
+                    <li>Priority support</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="cta-section">
+        <h2>Ready to Seal Your First File?</h2>
+        <p>Join thousands of projects using NotaryTON for blockchain-verified proof.</p>
+        <a href="https://t.me/{{ bot_username }}" class="cta">Open in Telegram</a>
+    </div>
+
+    <footer>
+        <p>Powered by TON Blockchain | <a href="https://t.me/JPandaJamez">Support</a> | <a href="/verify">Verify a Hash</a></p>
+        <p style="margin-top: 15px; font-size: 0.85rem;">2025 NotaryTON. All rights reserved.</p>
+    </footer>
+</body>
+</html>
