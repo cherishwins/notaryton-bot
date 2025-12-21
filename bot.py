@@ -2968,6 +2968,100 @@ async def tonapi_webhook(request: Request):
         return {"ok": False, "error": str(e)}
 
 
+# ========================
+# SEAL CASINO WEBHOOK - Game results & bets
+# ========================
+# Set up at TonConsole for address: EQA-LMcVJpo9UlOq55YfZ7fFyQttu64cq6FpuMiLjBOgVGHY
+
+SEAL_CASINO_ADDRESS = os.getenv("SEAL_CASINO_ADDRESS", "EQA-LMcVJpo9UlOq55YfZ7fFyQttu64cq6FpuMiLjBOgVGHY")
+TONCONSOLE_CASINO_SECRET = os.getenv("TONCONSOLE_CASINO_SECRET", "")
+
+@app.post("/webhook/casino")
+async def casino_webhook(request: Request):
+    """
+    Handle SealCasino smart contract events.
+    Receives bet placements, wins, losses, liquidity events.
+    """
+    try:
+        body = await request.body()
+
+        # Verify webhook signature if secret is configured
+        if TONCONSOLE_CASINO_SECRET:
+            signature = request.headers.get("X-Signature", "")
+            expected = hmac.new(
+                TONCONSOLE_CASINO_SECRET.encode(),
+                body,
+                hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(signature, expected):
+                print(f"⚠️ Casino webhook: Invalid signature")
+                return {"ok": False, "error": "Invalid signature"}
+
+        data = json.loads(body)
+        print(f"🎰 Casino webhook: {json.dumps(data, indent=2)[:500]}")
+
+        # TODO: Process casino events
+        # - PlaceBet: User placed a bet
+        # - BetResult: Win/lose outcome
+        # - AddLiquidity: LP added funds
+        # - Withdraw: LP withdrew funds
+
+        return {"ok": True, "processed": True}
+
+    except Exception as e:
+        print(f"⚠️ Casino webhook error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"ok": False, "error": str(e)}
+
+
+# ========================
+# SEAL TOKENS WEBHOOK - Token launches & trades
+# ========================
+# Set up at TonConsole for address: EQBju5vqGVsqfpjEpcNCFhn2CSKlVeQMG3f7kMz11Tw0A-ME
+
+SEAL_TOKENS_ADDRESS = os.getenv("SEAL_TOKENS_ADDRESS", "EQBju5vqGVsqfpjEpcNCFhn2CSKlVeQMG3f7kMz11Tw0A-ME")
+TONCONSOLE_TOKENS_SECRET = os.getenv("TONCONSOLE_TOKENS_SECRET", "")
+
+@app.post("/webhook/tokens")
+async def tokens_webhook(request: Request):
+    """
+    Handle SealTokenFactory smart contract events.
+    Receives token creations, buys, sells, graduations.
+    """
+    try:
+        body = await request.body()
+
+        # Verify webhook signature if secret is configured
+        if TONCONSOLE_TOKENS_SECRET:
+            signature = request.headers.get("X-Signature", "")
+            expected = hmac.new(
+                TONCONSOLE_TOKENS_SECRET.encode(),
+                body,
+                hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(signature, expected):
+                print(f"⚠️ Tokens webhook: Invalid signature")
+                return {"ok": False, "error": "Invalid signature"}
+
+        data = json.loads(body)
+        print(f"🪙 Tokens webhook: {json.dumps(data, indent=2)[:500]}")
+
+        # TODO: Process token events
+        # - CreateToken: New token launched
+        # - BuyTokens: Someone bought on bonding curve
+        # - SellTokens: Someone sold back to curve
+        # - GraduateToken: Token hit 69 TON, moving to DEX
+
+        return {"ok": True, "processed": True}
+
+    except Exception as e:
+        print(f"⚠️ Tokens webhook error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"ok": False, "error": str(e)}
+
+
 @app.get("/health")
 @app.head("/health")
 async def health_check():

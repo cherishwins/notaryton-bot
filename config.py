@@ -76,6 +76,20 @@ CHANNEL_ID = os.getenv("CHANNEL_ID", "")  # Telegram announcement channel
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # =============================================================================
+# SEAL CASINO & TOKEN FACTORY (Smart Contracts)
+# =============================================================================
+SEAL_CASINO_ADDRESS = os.getenv("SEAL_CASINO_ADDRESS", "EQA-LMcVJpo9UlOq55YfZ7fFyQttu64cq6FpuMiLjBOgVGHY")
+SEAL_TOKENS_ADDRESS = os.getenv("SEAL_TOKENS_ADDRESS", "EQBju5vqGVsqfpjEpcNCFhn2CSKlVeQMG3f7kMz11Tw0A-ME")
+
+# TonAPI keys for each contract
+TONAPI_CASINO_KEY = os.getenv("TONAPI_CASINO_KEY", "AGVIA46VSFGJTSQAAAAA4AD4B3BPP6HY77QUOGTUFUTRNCUR35XJLMDOXBTDTC4VBE7QBNY")
+TONAPI_TOKENS_KEY = os.getenv("TONAPI_TOKENS_KEY", "AGVIA46VNGVZOYYAAAAB7HTFXTMRIDNKFV3UAKX4M2AVQ7JZIDFPR5ISHSZKMEWNAVCHVNI")
+
+# TonConsole webhook secrets (set after creating webhooks at tonconsole.com)
+TONCONSOLE_CASINO_SECRET = os.getenv("TONCONSOLE_CASINO_SECRET", "")
+TONCONSOLE_TOKENS_SECRET = os.getenv("TONCONSOLE_TOKENS_SECRET", "")
+
+# =============================================================================
 # RATE LIMITS
 # =============================================================================
 API_RATE_LIMIT_PER_DAY = 1000
