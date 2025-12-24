@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rug Score - Is This Coin Safe? | NotaryTON</title>
+    <meta name="description" content="Free rug-pull detection for TON meme coins. Paste any token address and get an instant safety score. Know before you ape.">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://notaryton.com/score">
+    <meta property="og:title" content="Rug Score - Is This Coin Safe?">
+    <meta property="og:description" content="Free rug-pull detection for TON meme coins. Know before you ape.">
+    <meta property="og:image" content="https://notaryton.com/static/rugscore-og.png">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Rug Score - Is This Coin Safe?">
+    <meta name="twitter:description" content="Free rug-pull detection for TON meme coins. Know before you ape.">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+
+    <!-- Analytics -->
+    <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            font-size: 3rem;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            font-size: 2rem;
+            color: #00ff88;
+            margin-bottom: 10px;
+        }
+
+        .tagline {
+            color: #888;
+            font-size: 1.1rem;
+        }
+
+        .search-box {
+            background: #1a1a24;
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+            border: 1px solid #2a2a3a;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            background: #0a0a0f;
+            border: 2px solid #2a2a3a;
+            border-radius: 12px;
+            padding: 15px;
+            color: #fff;
+            font-size: 1rem;
+            font-family: monospace;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #00ff88;
+        }
+
+        input[type="text"]::placeholder {
+            color: #555;
+        }
+
+        button {
+            background: linear-gradient(135deg, #00ff88 0%, #00cc6a 100%);
+            border: none;
+            border-radius: 12px;
+            padding: 15px 25px;
+            color: #000;
+            font-weight: bold;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 255, 136, 0.3);
+        }
+
+        button:disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .hint {
+            color: #666;
+            font-size: 0.85rem;
+        }
+
+        /* Results */
+        .result {
+            background: #1a1a24;
+            border-radius: 16px;
+            padding: 30px;
+            border: 1px solid #2a2a3a;
+            display: none;
+        }
+
+        .result.show { display: block; }
+
+        .score-display {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        .score-circle {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 15px;
+            font-size: 3rem;
+            font-weight: bold;
+        }
+
+        .score-circle.green {
+            background: linear-gradient(135deg, #00ff88 0%, #00cc6a 100%);
+            color: #000;
+            box-shadow: 0 0 40px rgba(0, 255, 136, 0.4);
+        }
+
+        .score-circle.yellow {
+            background: linear-gradient(135deg, #ffcc00 0%, #ff9900 100%);
+            color: #000;
+            box-shadow: 0 0 40px rgba(255, 204, 0, 0.4);
+        }
+
+        .score-circle.red {
+            background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%);
+            color: #fff;
+            box-shadow: 0 0 40px rgba(255, 68, 68, 0.4);
+        }
+
+        .score-label {
+            font-size: 1rem;
+            margin-top: 5px;
+        }
+
+        .verdict {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .verdict.green { color: #00ff88; }
+        .verdict.yellow { color: #ffcc00; }
+        .verdict.red { color: #ff4444; }
+
+        .token-info {
+            background: #0a0a0f;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .token-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #1a1a24;
+        }
+
+        .token-row:last-child { border-bottom: none; }
+
+        .token-label { color: #888; }
+        .token-value { color: #fff; font-weight: 500; }
+
+        .warnings {
+            background: rgba(255, 68, 68, 0.1);
+            border: 1px solid rgba(255, 68, 68, 0.3);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .warnings h4 {
+            color: #ff4444;
+            margin-bottom: 10px;
+        }
+
+        .warnings ul {
+            list-style: none;
+            color: #ff8888;
+        }
+
+        .warnings li {
+            padding: 5px 0;
+        }
+
+        .share-section {
+            text-align: center;
+            padding-top: 20px;
+            border-top: 1px solid #2a2a3a;
+        }
+
+        .share-section p {
+            color: #888;
+            margin-bottom: 15px;
+        }
+
+        .share-btn {
+            background: #1da1f2;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 20px;
+            font-size: 0.9rem;
+        }
+
+        .error {
+            background: rgba(255, 68, 68, 0.1);
+            border: 1px solid rgba(255, 68, 68, 0.3);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            color: #ff4444;
+            display: none;
+        }
+
+        .error.show { display: block; }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            display: none;
+        }
+
+        .loading.show { display: block; }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #2a2a3a;
+            border-top-color: #00ff88;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #1a1a24;
+            color: #555;
+        }
+
+        .footer a {
+            color: #00ff88;
+            text-decoration: none;
+        }
+
+        .examples {
+            margin-top: 20px;
+        }
+
+        .examples h4 {
+            color: #888;
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+        }
+
+        .example-tokens {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .example-token {
+            background: #0a0a0f;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 0.85rem;
+            color: #888;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .example-token:hover {
+            border-color: #00ff88;
+            color: #00ff88;
+        }
+
+        @media (max-width: 500px) {
+            .input-group {
+                flex-direction: column;
+            }
+            h1 { font-size: 1.6rem; }
+            .score-circle { width: 120px; height: 120px; font-size: 2.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🐸</div>
+            <h1>Rug Score</h1>
+            <p class="tagline">Know before you ape. Free forever.</p>
+        </div>
+
+        <div class="search-box">
+            <div class="input-group">
+                <input type="text" id="tokenAddress" placeholder="Paste TON token address (EQ... or UQ...)">
+                <button onclick="checkScore()" id="checkBtn">Check</button>
+            </div>
+            <p class="hint">Works with any Jetton on TON blockchain</p>
+
+            <div class="examples">
+                <h4>Try these:</h4>
+                <div class="example-tokens">
+                    <span class="example-token" onclick="tryExample('EQBynBO23ywHy_CgarY9NK9FTz0yDsG82PtcbSTQgGoXwiuA')">jUSDT</span>
+                    <span class="example-token" onclick="tryExample('EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs')">USDT</span>
+                    <span class="example-token" onclick="tryExample('EQAvlWFDxGF2lXm67y4yzC17wYKD9A0guwPkMs1gOsM__NOT')">NOT</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Analyzing token...</p>
+        </div>
+
+        <div class="error" id="error">
+            <p id="errorMsg">Something went wrong</p>
+        </div>
+
+        <div class="result" id="result">
+            <div class="score-display">
+                <div class="score-circle" id="scoreCircle">
+                    <span id="scoreNum">85</span>
+                    <span class="score-label">/100</span>
+                </div>
+                <p class="verdict" id="verdict">WARNING</p>
+            </div>
+
+            <div class="token-info">
+                <div class="token-row">
+                    <span class="token-label">Token</span>
+                    <span class="token-value" id="tokenName">-</span>
+                </div>
+                <div class="token-row">
+                    <span class="token-label">Symbol</span>
+                    <span class="token-value" id="tokenSymbol">-</span>
+                </div>
+                <div class="token-row">
+                    <span class="token-label">Holders</span>
+                    <span class="token-value" id="tokenHolders">-</span>
+                </div>
+                <div class="token-row">
+                    <span class="token-label">Top Wallet</span>
+                    <span class="token-value" id="tokenTopWallet">-</span>
+                </div>
+            </div>
+
+            <div class="warnings" id="warnings" style="display: none;">
+                <h4>Warnings</h4>
+                <ul id="warningsList"></ul>
+            </div>
+
+            <div class="share-section">
+                <p>Share this score:</p>
+                <button class="share-btn" onclick="shareTwitter()">Share on X</button>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Powered by <a href="https://notaryton.com">NotaryTON</a> | Free API: <code>/api/v1/rugscore/{address}</code></p>
+        </div>
+    </div>
+
+    <script>
+        let lastResult = null;
+
+        function tryExample(address) {
+            document.getElementById('tokenAddress').value = address;
+            checkScore();
+        }
+
+        async function checkScore() {
+            const address = document.getElementById('tokenAddress').value.trim();
+            if (!address) return;
+
+            // Validate format
+            if (!address.startsWith('EQ') && !address.startsWith('UQ') && !address.startsWith('0:')) {
+                showError('Invalid address format. Must start with EQ, UQ, or 0:');
+                return;
+            }
+
+            // Show loading
+            document.getElementById('loading').classList.add('show');
+            document.getElementById('result').classList.remove('show');
+            document.getElementById('error').classList.remove('show');
+            document.getElementById('checkBtn').disabled = true;
+
+            try {
+                const response = await fetch(`/api/v1/rugscore/${encodeURIComponent(address)}`);
+                const data = await response.json();
+
+                document.getElementById('loading').classList.remove('show');
+                document.getElementById('checkBtn').disabled = false;
+
+                if (!data.success) {
+                    showError(data.error || 'Failed to analyze token');
+                    return;
+                }
+
+                lastResult = data;
+                showResult(data);
+
+            } catch (err) {
+                document.getElementById('loading').classList.remove('show');
+                document.getElementById('checkBtn').disabled = false;
+                showError('Network error. Please try again.');
+            }
+        }
+
+        function showError(msg) {
+            document.getElementById('error').classList.add('show');
+            document.getElementById('errorMsg').textContent = msg;
+            document.getElementById('result').classList.remove('show');
+        }
+
+        function showResult(data) {
+            document.getElementById('error').classList.remove('show');
+            document.getElementById('result').classList.add('show');
+
+            // Score circle
+            const circle = document.getElementById('scoreCircle');
+            const verdict = document.getElementById('verdict');
+
+            circle.className = 'score-circle ' + data.badge;
+            verdict.className = 'verdict ' + data.badge;
+
+            document.getElementById('scoreNum').textContent = data.score;
+            verdict.textContent = data.verdict;
+
+            // Token info
+            document.getElementById('tokenName').textContent = data.token.name || '-';
+            document.getElementById('tokenSymbol').textContent = data.token.symbol || '-';
+            document.getElementById('tokenHolders').textContent = data.token.holder_count || '-';
+            document.getElementById('tokenTopWallet').textContent = data.token.top_wallet_percent + '%' || '-';
+
+            // Warnings
+            const warningsDiv = document.getElementById('warnings');
+            const warningsList = document.getElementById('warningsList');
+
+            if (data.warnings && data.warnings.length > 0) {
+                warningsDiv.style.display = 'block';
+                warningsList.innerHTML = data.warnings.map(w => `<li>${w}</li>`).join('');
+            } else {
+                warningsDiv.style.display = 'none';
+            }
+        }
+
+        function shareTwitter() {
+            if (!lastResult) return;
+
+            const emoji = lastResult.badge === 'green' ? '🟢' : lastResult.badge === 'yellow' ? '🟡' : '🔴';
+            const text = `${emoji} ${lastResult.token.symbol} Rug Score: ${lastResult.score}/100 (${lastResult.verdict})\n\nCheck any TON token for free:\nhttps://notaryton.com/score\n\n#TON #MemeCoin #DYOR`;
+
+            window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
+        }
+
+        // Allow Enter key to trigger search
+        document.getElementById('tokenAddress').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') checkScore();
+        });
+    </script>
+</body>
+</html>

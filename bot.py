@@ -3428,6 +3428,11 @@ async def landing_page_legacy(request: Request):
         "bot_username": BOT_USERNAME
     })
 
+@app.get("/score", response_class=HTMLResponse)
+async def rugscore_page(request: Request):
+    """Rug Score landing page - marketing hook for token safety checks"""
+    return templates.TemplateResponse("score.html", {"request": request})
+
 # ========================
 # PUBLIC API ENDPOINTS (Make NotaryTON essential infrastructure)
 # ========================
