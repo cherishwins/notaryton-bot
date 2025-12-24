@@ -1266,6 +1266,28 @@ class Database:
                 )
             """)
 
+            # TON ID verified users - wallet-to-identity correlation
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS verified_users (
+                    id SERIAL PRIMARY KEY,
+                    telegram_id BIGINT UNIQUE NOT NULL,
+                    tonid_sub VARCHAR(100) UNIQUE,
+                    wallet_address VARCHAR(100),
+                    wallet_raw VARCHAR(150),
+                    name VARCHAR(200),
+                    picture_url TEXT,
+                    twitter_verified BOOLEAN DEFAULT FALSE,
+                    youtube_verified BOOLEAN DEFAULT FALSE,
+                    is_kol BOOLEAN DEFAULT FALSE,
+                    kol_id INTEGER REFERENCES kols(id),
+                    access_token TEXT,
+                    refresh_token TEXT,
+                    token_expires_at TIMESTAMP,
+                    verified_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+
             # Create indexes for performance
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_notarizations_user_id
@@ -1340,6 +1362,20 @@ class Database:
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_known_wallets_label
                 ON known_wallets(label)
+            """)
+
+            # Verified users indexes
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_verified_users_wallet
+                ON verified_users(wallet_address)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_verified_users_tonid
+                ON verified_users(tonid_sub)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_verified_users_kol
+                ON verified_users(kol_id) WHERE kol_id IS NOT NULL
             """)
 
     @asynccontextmanager

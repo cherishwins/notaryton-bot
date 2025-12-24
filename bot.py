@@ -3926,6 +3926,193 @@ async def api_kol_filters():
         return {"success": False, "error": str(e)}
 
 
+# =============================================================================
+# TON ID OAUTH INTEGRATION
+# =============================================================================
+
+@app.get("/auth/tonid/start")
+async def tonid_auth_start(user_id: int = None):
+    """
+    Start TON ID OAuth flow.
+    Returns authorization URL for redirect.
+    """
+    try:
+        from tonid import start_auth_session, TONID_CLIENT_ID
+
+        if not TONID_CLIENT_ID:
+            return {"success": False, "error": "TON ID not configured. Contact @boldov for CLIENT_ID."}
+
+        auth_url, pkce = start_auth_session(user_id or 0)
+
+        return {
+            "success": True,
+            "auth_url": auth_url,
+            "state": pkce.state,
+            "message": "Redirect user to auth_url"
+        }
+    except Exception as e:
+        print(f"TON ID start error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/auth/tonid/callback")
+async def tonid_auth_callback(code: str = None, state: str = None, error: str = None):
+    """
+    TON ID OAuth callback handler.
+    Exchanges code for tokens and stores verified user.
+    """
+    from starlette.responses import RedirectResponse
+
+    if error:
+        return RedirectResponse(url=f"https://notaryton.com/?auth_error={error}")
+
+    if not code or not state:
+        return RedirectResponse(url="https://notaryton.com/?auth_error=missing_params")
+
+    try:
+        from tonid import complete_auth
+
+        user = await complete_auth(code, state)
+
+        if not user:
+            return RedirectResponse(url="https://notaryton.com/?auth_error=auth_failed")
+
+        # Store verified user in database
+        await db.execute("""
+            INSERT INTO verified_users (
+                telegram_id, tonid_sub, wallet_address, wallet_raw,
+                name, picture_url, twitter_verified, youtube_verified
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (telegram_id) DO UPDATE SET
+                tonid_sub = EXCLUDED.tonid_sub,
+                wallet_address = EXCLUDED.wallet_address,
+                wallet_raw = EXCLUDED.wallet_raw,
+                name = EXCLUDED.name,
+                picture_url = EXCLUDED.picture_url,
+                twitter_verified = EXCLUDED.twitter_verified,
+                youtube_verified = EXCLUDED.youtube_verified,
+                updated_at = NOW()
+        """,
+            user.telegram_id,
+            user.sub,
+            user.wallet_address,
+            user.wallet_raw,
+            user.name,
+            user.picture,
+            user.twitter_verified,
+            user.youtube_verified
+        )
+
+        print(f"✅ TON ID verified: TG={user.telegram_id}, wallet={user.wallet_address}")
+
+        # Redirect to success page
+        return RedirectResponse(url=f"https://notaryton.com/?verified=true&wallet={user.wallet_address or ''}")
+
+    except Exception as e:
+        print(f"TON ID callback error: {e}")
+        return RedirectResponse(url=f"https://notaryton.com/?auth_error=server_error")
+
+
+@app.get("/api/v1/verified/{telegram_id}")
+async def api_get_verified_user(telegram_id: int):
+    """Get verified user info by Telegram ID"""
+    try:
+        row = await db.fetchrow("""
+            SELECT telegram_id, tonid_sub, wallet_address, name, picture_url,
+                   twitter_verified, youtube_verified, is_kol, kol_id, verified_at
+            FROM verified_users WHERE telegram_id = $1
+        """, telegram_id)
+
+        if not row:
+            return {"success": False, "error": "User not verified"}
+
+        return {
+            "success": True,
+            "verified": True,
+            "user": {
+                "telegram_id": row["telegram_id"],
+                "tonid_sub": row["tonid_sub"],
+                "wallet": row["wallet_address"],
+                "name": row["name"],
+                "picture": row["picture_url"],
+                "twitter_verified": row["twitter_verified"],
+                "youtube_verified": row["youtube_verified"],
+                "is_kol": row["is_kol"],
+                "kol_id": row["kol_id"],
+                "verified_at": row["verified_at"].isoformat() if row["verified_at"] else None
+            }
+        }
+    except Exception as e:
+        print(f"Verified user lookup error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/v1/verified/link-kol")
+async def api_link_verified_to_kol(telegram_id: int, kol_id: int):
+    """Link a verified user to their KOL profile"""
+    try:
+        # Check if user is verified
+        verified = await db.fetchrow(
+            "SELECT id FROM verified_users WHERE telegram_id = $1",
+            telegram_id
+        )
+
+        if not verified:
+            return {"success": False, "error": "User must be verified with TON ID first"}
+
+        # Check if KOL exists
+        kol = await db.fetchrow("SELECT id, name FROM kols WHERE id = $1", kol_id)
+        if not kol:
+            return {"success": False, "error": "KOL not found"}
+
+        # Link them
+        await db.execute("""
+            UPDATE verified_users
+            SET is_kol = TRUE, kol_id = $1, updated_at = NOW()
+            WHERE telegram_id = $2
+        """, kol_id, telegram_id)
+
+        print(f"✅ Linked TG {telegram_id} to KOL {kol['name']}")
+
+        return {
+            "success": True,
+            "message": f"Linked to KOL: {kol['name']}",
+            "kol_id": kol_id
+        }
+    except Exception as e:
+        print(f"KOL link error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/verified/stats")
+async def api_verified_stats():
+    """Get verification statistics"""
+    try:
+        total = await db.fetchval("SELECT COUNT(*) FROM verified_users")
+        with_wallet = await db.fetchval(
+            "SELECT COUNT(*) FROM verified_users WHERE wallet_address IS NOT NULL"
+        )
+        twitter_verified = await db.fetchval(
+            "SELECT COUNT(*) FROM verified_users WHERE twitter_verified = TRUE"
+        )
+        kols_verified = await db.fetchval(
+            "SELECT COUNT(*) FROM verified_users WHERE is_kol = TRUE"
+        )
+
+        return {
+            "success": True,
+            "stats": {
+                "total_verified": total,
+                "with_wallet": with_wallet,
+                "twitter_verified": twitter_verified,
+                "kols_verified": kols_verified
+            }
+        }
+    except Exception as e:
+        print(f"Verified stats error: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @app.get("/privacy", response_class=HTMLResponse)
 async def privacy_policy():
     """Privacy Policy"""
