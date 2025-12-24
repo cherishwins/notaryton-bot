@@ -7,7 +7,7 @@ import asyncio
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types, F
@@ -3328,6 +3328,271 @@ async def api_rugged_tokens(limit: int = 20):
     except Exception as e:
         print(f"❌ Rugged tokens error: {e}")
         return {"success": False, "error": str(e), "tokens": []}
+
+
+# ========================
+# LIVE TOKEN FEED - SSE
+# ========================
+
+async def token_event_generator():
+    """Server-Sent Events generator for live token feed."""
+    last_count = 0
+    while True:
+        try:
+            # Get latest tokens
+            tokens = await db.tokens.get_recent(limit=5)
+            stats = await db.tokens.get_stats()
+
+            # Build event data
+            data = {
+                "stats": stats,
+                "latest": [
+                    {
+                        "address": t.address,
+                        "symbol": t.symbol,
+                        "name": t.name,
+                        "score": t.safety_score,
+                        "holders": t.current_holder_count,
+                        "top_pct": round(t.current_top_holder_pct, 1),
+                        "rugged": t.rugged,
+                        "badge": "green" if t.safety_score >= 80 else ("yellow" if t.safety_score >= 50 else "red"),
+                        "time": t.first_seen.strftime("%H:%M:%S") if t.first_seen else None,
+                    }
+                    for t in tokens
+                ],
+                "new_count": stats["total_tracked"] - last_count if last_count > 0 else 0,
+            }
+            last_count = stats["total_tracked"]
+
+            yield f"data: {json.dumps(data)}\n\n"
+            await asyncio.sleep(5)  # Update every 5 seconds
+
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            await asyncio.sleep(10)
+
+
+@app.get("/api/v1/tokens/live")
+async def api_live_token_feed():
+    """Live token feed via Server-Sent Events."""
+    return StreamingResponse(
+        token_event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
+@app.get("/feed", response_class=HTMLResponse)
+async def live_feed_page():
+    """Live token scanner feed - cyberpunk style."""
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LIVE FEED - MemeScan</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Space Mono', monospace;
+            background: #0a0a0f;
+            color: #00ff88;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        .scanlines {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0,0,0,0.1) 0px,
+                rgba(0,0,0,0.1) 1px,
+                transparent 1px,
+                transparent 2px
+            );
+            pointer-events: none;
+            z-index: 1000;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header {
+            border-bottom: 2px solid #00ff88;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+        h1 {
+            font-size: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .live-dot {
+            width: 12px; height: 12px;
+            background: #ff0040;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+            box-shadow: 0 0 10px #ff0040;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .stat-box {
+            background: #111;
+            border: 1px solid #00ff8844;
+            padding: 15px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+        .stat-label { font-size: 0.7rem; color: #888; margin-top: 5px; }
+        .tokens { display: flex; flex-direction: column; gap: 10px; }
+        .token {
+            background: #111;
+            border: 1px solid #00ff8844;
+            padding: 15px;
+            display: grid;
+            grid-template-columns: 1fr auto auto auto;
+            gap: 20px;
+            align-items: center;
+            transition: all 0.3s;
+            animation: slideIn 0.5s ease-out;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        .token:hover { border-color: #00ff88; background: #1a1a2e; }
+        .token-info h3 { font-size: 1rem; margin-bottom: 5px; }
+        .token-info .addr { font-size: 0.65rem; color: #666; }
+        .badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: bold;
+        }
+        .badge.green { background: #00ff8833; color: #00ff88; border: 1px solid #00ff88; }
+        .badge.yellow { background: #ffaa0033; color: #ffaa00; border: 1px solid #ffaa00; }
+        .badge.red { background: #ff004033; color: #ff0040; border: 1px solid #ff0040; }
+        .score { font-size: 1.5rem; font-weight: bold; }
+        .time { color: #666; font-size: 0.8rem; }
+        .new-alert {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #00ff88;
+            color: #000;
+            padding: 15px 25px;
+            font-weight: bold;
+            animation: fadeIn 0.3s;
+            z-index: 999;
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        footer {
+            margin-top: 50px;
+            text-align: center;
+            color: #444;
+            font-size: 0.8rem;
+        }
+        footer a { color: #00ff88; }
+    </style>
+</head>
+<body>
+    <div class="scanlines"></div>
+    <div class="container">
+        <header>
+            <h1>
+                <span class="live-dot"></span>
+                MEMESCAN LIVE FEED
+                <span style="color: #666; font-size: 0.8rem;">v1.0</span>
+            </h1>
+        </header>
+
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-value" id="total">-</div>
+                <div class="stat-label">TOKENS TRACKED</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value" id="safe" style="color: #00ff88;">-</div>
+                <div class="stat-label">SAFE (80+)</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value" id="rugged" style="color: #ff0040;">-</div>
+                <div class="stat-label">RUGGED</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value" id="rate">-</div>
+                <div class="stat-label">RUG RATE %</div>
+            </div>
+        </div>
+
+        <h2 style="margin-bottom: 15px; color: #888; font-size: 0.9rem;">LATEST DISCOVERIES</h2>
+        <div class="tokens" id="tokens"></div>
+
+        <footer>
+            Powered by <a href="https://notaryton.com">NotaryTON</a> | Data updates every 5 seconds
+        </footer>
+    </div>
+
+    <div id="alert" class="new-alert" style="display: none;"></div>
+
+    <script>
+        const evtSource = new EventSource('/api/v1/tokens/live');
+        let lastTotal = 0;
+
+        evtSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.error) return;
+
+            // Update stats
+            document.getElementById('total').textContent = data.stats.total_tracked;
+            document.getElementById('safe').textContent = data.stats.safe_count;
+            document.getElementById('rugged').textContent = data.stats.rugged_count;
+            document.getElementById('rate').textContent = data.stats.rug_rate + '%';
+
+            // Show alert for new tokens
+            if (data.new_count > 0 && lastTotal > 0) {
+                const alert = document.getElementById('alert');
+                alert.textContent = `+${data.new_count} NEW TOKEN${data.new_count > 1 ? 'S' : ''} DETECTED`;
+                alert.style.display = 'block';
+                setTimeout(() => alert.style.display = 'none', 3000);
+            }
+            lastTotal = data.stats.total_tracked;
+
+            // Update token list
+            const container = document.getElementById('tokens');
+            container.innerHTML = data.latest.map(t => `
+                <div class="token">
+                    <div class="token-info">
+                        <h3>${t.symbol || '???'}</h3>
+                        <div class="addr">${t.address.slice(0, 12)}...${t.address.slice(-8)}</div>
+                    </div>
+                    <div class="badge ${t.badge}">${t.badge.toUpperCase()}</div>
+                    <div class="score" style="color: ${t.badge === 'green' ? '#00ff88' : (t.badge === 'yellow' ? '#ffaa00' : '#ff0040')}">${t.score}</div>
+                    <div class="time">${t.time || '-'}</div>
+                </div>
+            `).join('');
+        };
+
+        evtSource.onerror = () => console.log('SSE reconnecting...');
+    </script>
+</body>
+</html>
+"""
 
 
 @app.get("/api/v1/memescan/pools")
