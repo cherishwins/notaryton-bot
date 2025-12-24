@@ -3631,6 +3631,301 @@ async def api_memescan_pools(limit: int = 10):
         return {"success": False, "error": str(e), "pools": []}
 
 
+# ========================
+# KOL INTELLIGENCE API - THE DATA MOAT
+# ========================
+
+# Initialize KOL repository lazily
+_kol_repo = None
+
+async def get_kol_repo():
+    """Get or create KOL repository."""
+    global _kol_repo
+    if _kol_repo is None:
+        from kol_repository import KOLRepository
+        _kol_repo = KOLRepository(db.pool)
+        await _kol_repo.init_schema()
+    return _kol_repo
+
+
+@app.get("/api/v1/kols")
+async def api_kols_list(
+    chain: str = None,
+    category: str = None,
+    min_reputation: int = 0,
+    limit: int = 50
+):
+    """List tracked KOLs with optional filters."""
+    try:
+        repo = await get_kol_repo()
+        kols = await repo.list_all(
+            chain_focus=chain,
+            category=category,
+            min_reputation=min_reputation,
+            limit=min(limit, 100)
+        )
+        return {
+            "success": True,
+            "count": len(kols),
+            "kols": [
+                {
+                    "id": k.id,
+                    "name": k.name,
+                    "x_handle": k.x_handle,
+                    "telegram_channel": k.telegram_channel,
+                    "chain_focus": k.chain_focus,
+                    "category": k.category,
+                    "tier": k.tier,
+                    "total_calls": k.total_calls,
+                    "win_rate": k.win_rate,
+                    "rug_rate": k.rug_rate,
+                    "avg_return_pct": k.avg_return_pct,
+                    "best_call_return": k.best_call_return,
+                    "reputation_score": k.reputation_score,
+                    "verified_wallet": k.verified_wallet,
+                }
+                for k in kols
+            ],
+            "powered_by": "notaryton.com"
+        }
+    except Exception as e:
+        print(f"KOL list error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/kols/leaderboard")
+async def api_kols_leaderboard(limit: int = 20):
+    """Get top-performing KOLs by win rate."""
+    try:
+        repo = await get_kol_repo()
+        leaders = await repo.get_leaderboard(limit=min(limit, 50))
+        return {
+            "success": True,
+            "leaderboard": leaders,
+            "powered_by": "notaryton.com"
+        }
+    except Exception as e:
+        print(f"Leaderboard error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/kols/stats")
+async def api_kols_stats():
+    """Get KOL tracking statistics."""
+    try:
+        repo = await get_kol_repo()
+        stats = await repo.get_stats()
+        return {
+            "success": True,
+            "stats": stats,
+            "powered_by": "notaryton.com"
+        }
+    except Exception as e:
+        print(f"KOL stats error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/kols/{kol_id}")
+async def api_kol_detail(kol_id: int):
+    """Get detailed KOL profile."""
+    try:
+        repo = await get_kol_repo()
+        kol = await repo.get(kol_id)
+        if not kol:
+            return {"success": False, "error": "KOL not found"}
+
+        wallets = await repo.get_kol_wallets(kol_id)
+
+        return {
+            "success": True,
+            "kol": {
+                "id": kol.id,
+                "name": kol.name,
+                "x_handle": kol.x_handle,
+                "telegram_handle": kol.telegram_handle,
+                "telegram_channel": kol.telegram_channel,
+                "chain_focus": kol.chain_focus,
+                "category": kol.category,
+                "tier": kol.tier,
+                "x_followers": kol.x_followers,
+                "avg_likes": kol.avg_likes,
+                "avg_views": kol.avg_views,
+                "total_calls": kol.total_calls,
+                "winning_calls": kol.winning_calls,
+                "rug_calls": kol.rug_calls,
+                "win_rate": kol.win_rate,
+                "rug_rate": kol.rug_rate,
+                "avg_return_pct": kol.avg_return_pct,
+                "best_call_return": kol.best_call_return,
+                "reputation_score": kol.reputation_score,
+                "verified_wallet": kol.verified_wallet,
+                "notes": kol.notes,
+                "first_seen": kol.first_seen.isoformat() if kol.first_seen else None,
+                "last_active": kol.last_active.isoformat() if kol.last_active else None,
+            },
+            "wallets": [
+                {
+                    "address": w.wallet_address,
+                    "chain": w.chain,
+                    "verified": w.verified,
+                    "total_trades": w.total_trades,
+                    "total_pnl_usd": w.total_pnl_usd,
+                }
+                for w in wallets
+            ],
+            "powered_by": "notaryton.com"
+        }
+    except Exception as e:
+        print(f"KOL detail error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/kols/calls/recent")
+async def api_kol_calls_recent(chain: str = None, limit: int = 50):
+    """Get recent KOL calls."""
+    try:
+        repo = await get_kol_repo()
+        calls = await repo.get_recent_calls(chain=chain, limit=min(limit, 100))
+        return {
+            "success": True,
+            "count": len(calls),
+            "calls": calls,
+            "powered_by": "notaryton.com"
+        }
+    except Exception as e:
+        print(f"Recent calls error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/kols/calls/token/{token_address}")
+async def api_kol_calls_for_token(token_address: str):
+    """Get all KOL calls for a specific token."""
+    try:
+        repo = await get_kol_repo()
+        calls = await repo.get_calls_for_token(token_address)
+        return {
+            "success": True,
+            "token_address": token_address,
+            "count": len(calls),
+            "calls": calls,
+            "powered_by": "notaryton.com"
+        }
+    except Exception as e:
+        print(f"Token calls error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/kols/wallet/{wallet_address}")
+async def api_kol_by_wallet(wallet_address: str):
+    """Find KOL associated with a wallet address."""
+    try:
+        repo = await get_kol_repo()
+        result = await repo.find_kol_by_wallet(wallet_address)
+        if result:
+            return {
+                "success": True,
+                "found": True,
+                "kol": result,
+                "powered_by": "notaryton.com"
+            }
+        return {
+            "success": True,
+            "found": False,
+            "message": "No KOL linked to this wallet"
+        }
+    except Exception as e:
+        print(f"Wallet lookup error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/v1/kols/seed")
+async def api_kol_seed():
+    """Seed database with Grok KOL intel (admin only)."""
+    try:
+        repo = await get_kol_repo()
+        count = await repo.seed_from_grok()
+        return {
+            "success": True,
+            "seeded": count,
+            "message": f"Added {count} new KOLs from Grok intel"
+        }
+    except Exception as e:
+        print(f"Seed error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/kols/by-language/{lang}")
+async def api_kols_by_language(lang: str, limit: int = 50):
+    """Filter KOLs by language code (en, ru, zh, etc.)."""
+    try:
+        repo = await get_kol_repo()
+        kols = await repo.get_by_language(lang.lower(), limit)
+        return {
+            "success": True,
+            "language": lang.lower(),
+            "count": len(kols),
+            "kols": [kol.to_dict() for kol in kols]
+        }
+    except Exception as e:
+        print(f"KOL language filter error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/kols/by-category/{category}")
+async def api_kols_by_category(category: str, limit: int = 50):
+    """Filter KOLs by category (general, ton, watchdog, solana, cross_chain, regional)."""
+    try:
+        repo = await get_kol_repo()
+        kols = await repo.get_by_category(category.lower(), limit)
+        return {
+            "success": True,
+            "category": category.lower(),
+            "count": len(kols),
+            "kols": [kol.to_dict() for kol in kols]
+        }
+    except Exception as e:
+        print(f"KOL category filter error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/kols/by-chain/{chain}")
+async def api_kols_by_chain(chain: str, limit: int = 50):
+    """Filter KOLs by chain focus (ton, sol, eth, btc, multi, etc.)."""
+    try:
+        repo = await get_kol_repo()
+        kols = await repo.get_by_chain(chain.lower(), limit)
+        return {
+            "success": True,
+            "chain": chain.lower(),
+            "count": len(kols),
+            "kols": [kol.to_dict() for kol in kols]
+        }
+    except Exception as e:
+        print(f"KOL chain filter error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/kols/filters")
+async def api_kol_filters():
+    """Get available filter options for KOL queries."""
+    try:
+        repo = await get_kol_repo()
+        languages = await repo.get_available_languages()
+        categories = await repo.get_available_categories()
+        chains = await repo.get_available_chains()
+        return {
+            "success": True,
+            "filters": {
+                "languages": languages,
+                "categories": categories,
+                "chains": chains
+            }
+        }
+    except Exception as e:
+        print(f"KOL filters error: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @app.get("/privacy", response_class=HTMLResponse)
 async def privacy_policy():
     """Privacy Policy"""
