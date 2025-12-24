@@ -20,6 +20,7 @@ from typing import Optional
 from database import db, TrackedToken
 from memescan.api import MemeScanClient, TonAPI, GeckoTerminalAPI
 from memescan.models import SafetyLevel
+from social import announce_rug, announce_danger_score, announce_whale
 
 
 class TokenCrawler:
@@ -162,6 +163,16 @@ class TokenCrawler:
             )
             print(f"✅ New token tracked: {analysis.symbol} (score: {safety_score})")
 
+            # Auto-post danger alerts for very low scores
+            if safety_score < 40:
+                await announce_danger_score(
+                    symbol=analysis.symbol,
+                    address=address,
+                    safety_score=safety_score,
+                    holder_count=analysis.holder_count or 0,
+                    top_holder_pct=analysis.dev_wallet_percent or 0
+                )
+
             # Snapshot initial holders for new tokens
             if holders and total_supply > 0:
                 count = await db.wallets.snapshot_holders(address, holders, total_supply)
@@ -222,6 +233,13 @@ class TokenCrawler:
                         }
                     )
                     print(f"🚨 RUG DETECTED: {token.symbol}")
+                    # Auto-post to X and Telegram
+                    await announce_rug(
+                        symbol=token.symbol,
+                        address=token.address,
+                        detection_method="dev_exit",
+                        dev_exit_pct=token.initial_top_holder_pct - analysis.dev_wallet_percent
+                    )
 
                 # 2. Holders dropped by 80%+
                 if analysis.holder_count and token.initial_holder_count:
@@ -238,6 +256,14 @@ class TokenCrawler:
                             }
                         )
                         print(f"🚨 RUG DETECTED (holder exodus): {token.symbol}")
+                        # Auto-post to X and Telegram
+                        await announce_rug(
+                            symbol=token.symbol,
+                            address=token.address,
+                            detection_method="holder_exodus",
+                            initial_holders=token.initial_holder_count,
+                            current_holders=analysis.holder_count
+                        )
 
                 await asyncio.sleep(self._analyze_interval)
 

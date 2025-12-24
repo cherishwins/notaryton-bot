@@ -234,3 +234,255 @@ social_poster = SocialPoster()
 async def announce_seal(file_hash: str, pot_stars: int, pot_ton: float, next_draw: str):
     """Convenience function to announce a seal"""
     await social_poster.post_seal_announcement(file_hash, pot_stars, pot_ton, next_draw)
+
+
+# =============================================================================
+# TOKEN INTELLIGENCE AUTO-POSTING
+# =============================================================================
+
+class TokenPoster:
+    """
+    Auto-posts token intelligence to X and Telegram.
+    - Rug detections (high priority - always post)
+    - Low safety scores (warnings)
+    - Whale movements (optional)
+    """
+
+    def __init__(self):
+        self.twitter_client: Optional[tweepy.Client] = None
+        self.telegram_bot: Optional[Bot] = None
+        self.telegram_channel: Optional[str] = None
+        self._initialized = False
+
+    def initialize(self):
+        """Initialize from environment (shares creds with SocialPoster)"""
+        if self._initialized:
+            return
+
+        twitter_api_key = os.getenv("TWITTER_API_KEY")
+        twitter_api_secret = os.getenv("TWITTER_API_SECRET")
+        twitter_access_token = os.getenv("TWITTER_ACCESS_TOKEN")
+        twitter_access_secret = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
+
+        if all([twitter_api_key, twitter_api_secret, twitter_access_token, twitter_access_secret]):
+            try:
+                self.twitter_client = tweepy.Client(
+                    consumer_key=twitter_api_key,
+                    consumer_secret=twitter_api_secret,
+                    access_token=twitter_access_token,
+                    access_token_secret=twitter_access_secret
+                )
+            except Exception as e:
+                print(f"⚠️ TokenPoster Twitter init failed: {e}")
+
+        telegram_token = os.getenv("MEMESEAL_BOT_TOKEN")
+        self.telegram_channel = os.getenv("TELEGRAM_CHANNEL_ID", "@MemeSealTON")
+
+        if telegram_token:
+            try:
+                self.telegram_bot = Bot(token=telegram_token)
+            except Exception as e:
+                print(f"⚠️ TokenPoster Telegram init failed: {e}")
+
+        self._initialized = True
+
+    async def post_rug_detected(
+        self,
+        symbol: str,
+        address: str,
+        detection_method: str,
+        initial_holders: int = 0,
+        current_holders: int = 0,
+        dev_exit_pct: float = 0
+    ):
+        """
+        🚨 RUG DETECTED - Always post, high priority
+        """
+        if not self._initialized:
+            self.initialize()
+
+        short_addr = address[:8] + "..." + address[-4:] if len(address) > 16 else address
+        score_url = f"https://notaryton.com/score/{address}"
+
+        # Build reason based on detection method
+        if detection_method == "dev_exit":
+            reason = f"Dev sold {dev_exit_pct:.0f}% of holdings"
+        elif detection_method == "holder_exodus":
+            drop_pct = ((initial_holders - current_holders) / initial_holders * 100) if initial_holders else 0
+            reason = f"Holders crashed {drop_pct:.0f}% ({initial_holders} → {current_holders})"
+        else:
+            reason = detection_method
+
+        telegram_msg = (
+            f"🚨 <b>RUG DETECTED</b> 🚨\n\n"
+            f"<b>${symbol}</b>\n"
+            f"📍 {short_addr}\n"
+            f"⚠️ {reason}\n\n"
+            f"<a href='{score_url}'>View Full Analysis →</a>\n\n"
+            f"#RugPull #TON #MemeScan"
+        )
+
+        twitter_msg = (
+            f"🚨 RUG DETECTED: ${symbol}\n\n"
+            f"⚠️ {reason}\n\n"
+            f"Check score: {score_url}\n\n"
+            f"#TON #RugPull #CryptoScam #MemeScan"
+        )
+
+        # Post immediately (rugs are high priority)
+        await self._post_twitter(twitter_msg)
+        await self._post_telegram(telegram_msg, score_url)
+
+    async def post_danger_score(
+        self,
+        symbol: str,
+        address: str,
+        safety_score: int,
+        holder_count: int,
+        top_holder_pct: float
+    ):
+        """
+        ⚠️ LOW SAFETY SCORE WARNING - Post for scores < 40
+        """
+        if not self._initialized:
+            self.initialize()
+
+        if safety_score >= 40:
+            return  # Only post danger warnings
+
+        short_addr = address[:8] + "..." + address[-4:] if len(address) > 16 else address
+        score_url = f"https://notaryton.com/score/{address}"
+
+        telegram_msg = (
+            f"⚠️ <b>HIGH RISK TOKEN</b>\n\n"
+            f"<b>${symbol}</b> - Score: {safety_score}/100\n"
+            f"📍 {short_addr}\n"
+            f"👥 {holder_count} holders\n"
+            f"🐋 Top holder: {top_holder_pct:.1f}%\n\n"
+            f"<a href='{score_url}'>Full Analysis →</a>\n\n"
+            f"DYOR 🔍 #TON #MemeScan"
+        )
+
+        twitter_msg = (
+            f"⚠️ HIGH RISK: ${symbol}\n\n"
+            f"Score: {safety_score}/100 🔴\n"
+            f"Top holder owns {top_holder_pct:.1f}%\n\n"
+            f"{score_url}\n\n"
+            f"#TON #CryptoRisk #DYOR"
+        )
+
+        await self._post_twitter(twitter_msg)
+        await self._post_telegram(telegram_msg, score_url)
+
+    async def post_whale_alert(
+        self,
+        symbol: str,
+        address: str,
+        whale_wallet: str,
+        event_type: str,  # 'entry' or 'exit'
+        pct: float
+    ):
+        """
+        🐋 WHALE MOVEMENT - Post for significant moves (>10%)
+        """
+        if not self._initialized:
+            self.initialize()
+
+        if pct < 10:
+            return  # Only post big moves
+
+        short_addr = address[:8] + "..." + address[-4:] if len(address) > 16 else address
+        short_whale = whale_wallet[:8] + "..." if len(whale_wallet) > 12 else whale_wallet
+        score_url = f"https://notaryton.com/score/{address}"
+
+        if event_type == "entry":
+            emoji = "🐋"
+            action = f"bought {pct:.1f}%"
+        else:
+            emoji = "🏃"
+            action = f"dumped {pct:.1f}%"
+
+        telegram_msg = (
+            f"{emoji} <b>WHALE {event_type.upper()}</b>\n\n"
+            f"<b>${symbol}</b>\n"
+            f"Wallet {short_whale} {action}\n\n"
+            f"<a href='{score_url}'>Check Score →</a>"
+        )
+
+        twitter_msg = (
+            f"{emoji} WHALE {event_type.upper()}: ${symbol}\n\n"
+            f"Wallet {action}\n\n"
+            f"{score_url}\n\n"
+            f"#TON #WhaleAlert"
+        )
+
+        await self._post_twitter(twitter_msg)
+        await self._post_telegram(telegram_msg, score_url)
+
+    async def _post_twitter(self, message: str):
+        """Post to Twitter with rate limiting"""
+        if not self.twitter_client:
+            return
+
+        if not rate_limiter.can_post_twitter():
+            print("⏳ Token Twitter rate limited, skipping")
+            return
+
+        try:
+            response = self.twitter_client.create_tweet(text=message)
+            rate_limiter.record_twitter_post()
+            print(f"✅ Token alert posted to X: {response.data['id']}")
+        except tweepy.TooManyRequests:
+            print("⚠️ Twitter rate limit (API)")
+        except tweepy.Forbidden as e:
+            print(f"⚠️ Twitter forbidden: {e}")
+        except Exception as e:
+            print(f"❌ Twitter post failed: {e}")
+
+    async def _post_telegram(self, message: str, url: str):
+        """Post to Telegram channel"""
+        if not self.telegram_bot or not self.telegram_channel:
+            return
+
+        if not rate_limiter.can_post_telegram():
+            print("⏳ Token Telegram rate limited, skipping")
+            return
+
+        try:
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔍 View Analysis", url=url)],
+                [InlineKeyboardButton(text="🐸 MemeScan Bot", url="https://t.me/MemeSealTON_bot")]
+            ])
+
+            await self.telegram_bot.send_message(
+                chat_id=self.telegram_channel,
+                text=message,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+            rate_limiter.record_telegram_post()
+            print(f"✅ Token alert posted to Telegram")
+        except Exception as e:
+            print(f"❌ Telegram post failed: {e}")
+
+
+# Global token poster singleton
+token_poster = TokenPoster()
+
+
+# Convenience functions for crawler integration
+async def announce_rug(symbol: str, address: str, detection_method: str, **kwargs):
+    """Call from crawler when rug is detected"""
+    await token_poster.post_rug_detected(symbol, address, detection_method, **kwargs)
+
+
+async def announce_danger_score(symbol: str, address: str, safety_score: int, holder_count: int, top_holder_pct: float):
+    """Call from crawler for dangerous tokens"""
+    await token_poster.post_danger_score(symbol, address, safety_score, holder_count, top_holder_pct)
+
+
+async def announce_whale(symbol: str, address: str, whale_wallet: str, event_type: str, pct: float):
+    """Call from crawler for whale movements"""
+    await token_poster.post_whale_alert(symbol, address, whale_wallet, event_type, pct)
