@@ -111,12 +111,12 @@ const swap = await swapcoffee.executeSwap(quote);
 
 ## Contact Information
 
-- **Telegram:** @[YOUR_HANDLE]
-- **Email:** [YOUR_EMAIL]
-- **GitHub:** [YOUR_GITHUB]
+- **Telegram:** @JPandaJamez
+- **Email:** panda@juche.org
+- **GitHub:** github.com/jdevop33
 - **Existing Projects:**
-  - MemeSeal: [link]
-  - MemeScan: [link]
+  - MemeSeal: https://notaryton.com
+  - MemeScan: https://memescan-ton.vercel.app
 
 ---
 

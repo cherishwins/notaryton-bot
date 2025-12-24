@@ -100,9 +100,9 @@ We see STON.fi as critical infrastructure for DeFi on TON, and SealBet will driv
 
 ## Contact
 
-- **Telegram:** @[YOUR_HANDLE]
-- **Email:** [YOUR_EMAIL]
-- **GitHub:** [YOUR_GITHUB]
+- **Telegram:** @JPandaJamez
+- **Email:** panda@juche.org
+- **GitHub:** github.com/jdevop33
 
 ---
 
