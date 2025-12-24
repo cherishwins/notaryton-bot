@@ -1973,7 +1973,7 @@ if memeseal_dp:
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(
                 text="🎰 PLAY CASINO",
-                web_app=WebAppInfo(url="https://memeseal-casino.vercel.app")
+                web_app=WebAppInfo(url="https://casino.notaryton.com")
             )],
             [types.InlineKeyboardButton(text="💰 Check Lottery Pot", callback_data="ms_check_pot")],
             [types.InlineKeyboardButton(text="🚀 Go Unlimited (20 ⭐/mo)", callback_data="ms_pay_stars_sub")]
@@ -2450,7 +2450,7 @@ if memeseal_dp:
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(
                 text="🎰 OPEN CASINO",
-                web_app=WebAppInfo(url="https://memeseal-casino.vercel.app")
+                web_app=WebAppInfo(url="https://casino.notaryton.com")
             )]
         ])
 
