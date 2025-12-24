@@ -3343,7 +3343,7 @@ async def token_event_generator():
             tokens = await db.tokens.get_recent(limit=5)
             stats = await db.tokens.get_stats()
 
-            # Build event data
+            # Build event data (convert Decimals to float for JSON)
             data = {
                 "stats": stats,
                 "latest": [
@@ -3351,11 +3351,11 @@ async def token_event_generator():
                         "address": t.address,
                         "symbol": t.symbol,
                         "name": t.name,
-                        "score": t.safety_score,
-                        "holders": t.current_holder_count,
-                        "top_pct": round(t.current_top_holder_pct, 1),
-                        "rugged": t.rugged,
-                        "badge": "green" if t.safety_score >= 80 else ("yellow" if t.safety_score >= 50 else "red"),
+                        "score": int(t.safety_score) if t.safety_score else 0,
+                        "holders": int(t.current_holder_count) if t.current_holder_count else 0,
+                        "top_pct": round(float(t.current_top_holder_pct or 0), 1),
+                        "rugged": bool(t.rugged),
+                        "badge": "green" if (t.safety_score or 0) >= 80 else ("yellow" if (t.safety_score or 0) >= 50 else "red"),
                         "time": t.first_seen.strftime("%H:%M:%S") if t.first_seen else None,
                     }
                     for t in tokens
