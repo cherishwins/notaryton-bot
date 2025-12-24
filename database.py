@@ -1266,6 +1266,86 @@ class Database:
                 )
             """)
 
+            # KOL Profiles - Key Opinion Leaders tracking
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS kols (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(100),
+                    x_handle VARCHAR(50),
+                    telegram VARCHAR(100),
+                    telegram_note TEXT,
+                    chain_focus JSONB DEFAULT '["multi"]',
+                    category VARCHAR(30) DEFAULT 'general',
+                    tier VARCHAR(20) DEFAULT 'unknown',
+                    language VARCHAR(10) DEFAULT 'en',
+                    x_followers INTEGER DEFAULT 0,
+                    avg_likes INTEGER DEFAULT 0,
+                    avg_views INTEGER DEFAULT 0,
+                    engagement TEXT,
+                    total_calls INTEGER DEFAULT 0,
+                    winning_calls INTEGER DEFAULT 0,
+                    rug_calls INTEGER DEFAULT 0,
+                    avg_return_pct DECIMAL(10, 2) DEFAULT 0,
+                    best_call_return DECIMAL(10, 2) DEFAULT 0,
+                    verified BOOLEAN DEFAULT FALSE,
+                    verified_wallet BOOLEAN DEFAULT FALSE,
+                    reputation_score INTEGER DEFAULT 50,
+                    edge TEXT,
+                    win_play TEXT,
+                    notes TEXT,
+                    source VARCHAR(20) DEFAULT 'grok',
+                    first_seen TIMESTAMP DEFAULT NOW(),
+                    last_active TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(x_handle)
+                )
+            """)
+
+            # KOL Calls - Token recommendations/shills
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS kol_calls (
+                    id SERIAL PRIMARY KEY,
+                    kol_id INTEGER REFERENCES kols(id),
+                    token_address VARCHAR(100),
+                    token_symbol VARCHAR(50) NOT NULL,
+                    chain VARCHAR(20) DEFAULT 'ton',
+                    call_type VARCHAR(20) DEFAULT 'buy',
+                    call_price_usd DECIMAL(30, 18) DEFAULT 0,
+                    call_mcap DECIMAL(20, 2) DEFAULT 0,
+                    source_platform VARCHAR(20) DEFAULT 'x',
+                    source_url TEXT,
+                    source_text TEXT,
+                    peak_price_usd DECIMAL(30, 18) DEFAULT 0,
+                    peak_mcap DECIMAL(20, 2) DEFAULT 0,
+                    final_price_usd DECIMAL(30, 18) DEFAULT 0,
+                    return_pct DECIMAL(10, 2) DEFAULT 0,
+                    outcome VARCHAR(20) DEFAULT 'pending',
+                    rugged BOOLEAN DEFAULT FALSE,
+                    called_at TIMESTAMP DEFAULT NOW(),
+                    peak_at TIMESTAMP,
+                    resolved_at TIMESTAMP
+                )
+            """)
+
+            # KOL Wallets - Verified wallet addresses
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS kol_wallets (
+                    id SERIAL PRIMARY KEY,
+                    kol_id INTEGER REFERENCES kols(id),
+                    wallet_address VARCHAR(128) NOT NULL,
+                    chain VARCHAR(20) DEFAULT 'ton',
+                    verified BOOLEAN DEFAULT FALSE,
+                    verification_method VARCHAR(50),
+                    total_trades INTEGER DEFAULT 0,
+                    profitable_trades INTEGER DEFAULT 0,
+                    total_pnl_usd DECIMAL(20, 2) DEFAULT 0,
+                    notes TEXT,
+                    first_seen TIMESTAMP,
+                    last_active TIMESTAMP,
+                    UNIQUE(wallet_address, chain)
+                )
+            """)
+
             # TON ID verified users - wallet-to-identity correlation
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS verified_users (
@@ -1362,6 +1442,40 @@ class Database:
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_known_wallets_label
                 ON known_wallets(label)
+            """)
+
+            # KOL indexes
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kols_x_handle
+                ON kols(x_handle)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kols_category
+                ON kols(category)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kols_reputation
+                ON kols(reputation_score DESC)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kol_calls_kol
+                ON kol_calls(kol_id)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kol_calls_token
+                ON kol_calls(token_address)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kol_calls_time
+                ON kol_calls(called_at DESC)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kol_wallets_kol
+                ON kol_wallets(kol_id)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kol_wallets_address
+                ON kol_wallets(wallet_address)
             """)
 
             # Verified users indexes
