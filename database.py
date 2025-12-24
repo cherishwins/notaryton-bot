@@ -100,6 +100,50 @@ class LotteryEntry:
     won: bool = False
 
 
+@dataclass
+class TrackedToken:
+    """Token tracked for rug detection and scoring."""
+    address: str
+    symbol: Optional[str] = None
+    name: Optional[str] = None
+    decimals: int = 9
+    deployer: Optional[str] = None
+    total_supply: float = 0
+
+    # Snapshot at first detection
+    first_seen: Optional[datetime] = None
+    initial_holder_count: int = 0
+    initial_top_holder_pct: float = 0
+    initial_liquidity_usd: float = 0
+
+    # Safety analysis
+    safety_score: int = 50
+    lp_locked: bool = False
+    ownership_renounced: bool = False
+
+    # Rug detection
+    first_dev_sell_at: Optional[datetime] = None
+    first_dev_sell_pct: float = 0
+    rugged: bool = False
+    rugged_at: Optional[datetime] = None
+
+    # Current state
+    current_holder_count: int = 0
+    current_top_holder_pct: float = 0
+    current_price_usd: float = 0
+    last_updated: Optional[datetime] = None
+
+
+@dataclass
+class TokenEvent:
+    """Significant event for a tracked token."""
+    id: Optional[int] = None
+    token_address: str = ""
+    event_type: str = ""  # 'deploy', 'first_sell', 'whale_dump', 'rug', 'moon'
+    event_data: Dict[str, Any] = field(default_factory=dict)
+    created_at: Optional[datetime] = None
+
+
 # ========================
 # REPOSITORY CLASSES
 # ========================
@@ -594,6 +638,148 @@ class ApiKeyRepository:
             await conn.execute("DELETE FROM api_keys WHERE key = $1", key)
 
 
+class TokenRepository:
+    """Repository for token tracking - THE DATA MOAT 📊"""
+
+    def __init__(self, pool: Pool):
+        self._pool = pool
+
+    async def get(self, address: str) -> Optional[TrackedToken]:
+        """Get token by address"""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM tracked_tokens WHERE address = $1",
+                address
+            )
+            if row:
+                return TrackedToken(**dict(row))
+            return None
+
+    async def upsert(self, token: TrackedToken) -> None:
+        """Insert or update a token"""
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO tracked_tokens (
+                    address, symbol, name, decimals, deployer, total_supply,
+                    first_seen, initial_holder_count, initial_top_holder_pct,
+                    initial_liquidity_usd, safety_score, lp_locked,
+                    ownership_renounced, current_holder_count,
+                    current_top_holder_pct, current_price_usd, last_updated
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+                ON CONFLICT (address) DO UPDATE SET
+                    symbol = COALESCE($2, tracked_tokens.symbol),
+                    name = COALESCE($3, tracked_tokens.name),
+                    current_holder_count = $14,
+                    current_top_holder_pct = $15,
+                    current_price_usd = $16,
+                    safety_score = $11,
+                    last_updated = NOW()
+            """,
+                token.address, token.symbol, token.name, token.decimals,
+                token.deployer, token.total_supply, token.first_seen,
+                token.initial_holder_count, token.initial_top_holder_pct,
+                token.initial_liquidity_usd, token.safety_score,
+                token.lp_locked, token.ownership_renounced,
+                token.current_holder_count, token.current_top_holder_pct,
+                token.current_price_usd
+            )
+
+    async def mark_rugged(self, address: str) -> None:
+        """Mark a token as rugged"""
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE tracked_tokens
+                SET rugged = TRUE, rugged_at = NOW()
+                WHERE address = $1
+            """, address)
+
+    async def record_dev_sell(self, address: str, sell_pct: float) -> None:
+        """Record first developer sell"""
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE tracked_tokens
+                SET first_dev_sell_at = NOW(), first_dev_sell_pct = $2
+                WHERE address = $1 AND first_dev_sell_at IS NULL
+            """, address, sell_pct)
+
+    async def get_recent(self, limit: int = 100) -> List[TrackedToken]:
+        """Get recently tracked tokens"""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM tracked_tokens
+                ORDER BY first_seen DESC
+                LIMIT $1
+            """, limit)
+            return [TrackedToken(**dict(row)) for row in rows]
+
+    async def get_rugged(self, limit: int = 100) -> List[TrackedToken]:
+        """Get tokens that rugged"""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM tracked_tokens
+                WHERE rugged = TRUE
+                ORDER BY rugged_at DESC
+                LIMIT $1
+            """, limit)
+            return [TrackedToken(**dict(row)) for row in rows]
+
+    async def get_safe(self, min_score: int = 80, limit: int = 100) -> List[TrackedToken]:
+        """Get tokens with high safety scores"""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM tracked_tokens
+                WHERE safety_score >= $1 AND rugged = FALSE
+                ORDER BY safety_score DESC, first_seen DESC
+                LIMIT $2
+            """, min_score, limit)
+            return [TrackedToken(**dict(row)) for row in rows]
+
+    async def get_stats(self) -> Dict[str, Any]:
+        """Get tracking statistics"""
+        async with self._pool.acquire() as conn:
+            total = await conn.fetchval("SELECT COUNT(*) FROM tracked_tokens")
+            rugged = await conn.fetchval("SELECT COUNT(*) FROM tracked_tokens WHERE rugged = TRUE")
+            safe = await conn.fetchval("SELECT COUNT(*) FROM tracked_tokens WHERE safety_score >= 80")
+            today = await conn.fetchval("""
+                SELECT COUNT(*) FROM tracked_tokens
+                WHERE first_seen >= NOW() - INTERVAL '24 hours'
+            """)
+            return {
+                "total_tracked": total or 0,
+                "rugged_count": rugged or 0,
+                "safe_count": safe or 0,
+                "tracked_today": today or 0,
+                "rug_rate": round((rugged or 0) / max(total or 1, 1) * 100, 1)
+            }
+
+    async def add_event(self, token_address: str, event_type: str, event_data: Dict[str, Any] = None) -> None:
+        """Log a token event"""
+        import json
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO token_events (token_address, event_type, event_data)
+                VALUES ($1, $2, $3)
+            """, token_address, event_type, json.dumps(event_data or {}))
+
+    async def get_events(self, token_address: str, limit: int = 50) -> List[TokenEvent]:
+        """Get events for a token"""
+        import json
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM token_events
+                WHERE token_address = $1
+                ORDER BY created_at DESC
+                LIMIT $2
+            """, token_address, limit)
+            events = []
+            for row in rows:
+                d = dict(row)
+                if d.get('event_data'):
+                    d['event_data'] = json.loads(d['event_data'])
+                events.append(TokenEvent(**d))
+            return events
+
+
 # ========================
 # DATABASE CLASS
 # ========================
@@ -620,6 +806,7 @@ class Database:
         self._bot_state: Optional[BotStateRepository] = None
         self._api_keys: Optional[ApiKeyRepository] = None
         self._lottery: Optional[LotteryRepository] = None
+        self._tokens: Optional[TokenRepository] = None
 
     @property
     def pool(self) -> Pool:
@@ -657,6 +844,12 @@ class Database:
             raise RuntimeError("Database not connected. Call await db.connect() first.")
         return self._lottery
 
+    @property
+    def tokens(self) -> TokenRepository:
+        if self._tokens is None:
+            raise RuntimeError("Database not connected. Call await db.connect() first.")
+        return self._tokens
+
     async def connect(self, database_url: Optional[str] = None) -> None:
         """
         Connect to the database and initialize connection pool.
@@ -692,6 +885,7 @@ class Database:
         self._bot_state = BotStateRepository(self._pool)
         self._api_keys = ApiKeyRepository(self._pool)
         self._lottery = LotteryRepository(self._pool)
+        self._tokens = TokenRepository(self._pool)
 
         # Initialize schema
         await self._init_schema()
@@ -708,6 +902,7 @@ class Database:
             self._bot_state = None
             self._api_keys = None
             self._lottery = None
+            self._tokens = None
             print("Database disconnected")
 
     async def _init_schema(self) -> None:
@@ -784,6 +979,52 @@ class Database:
                 )
             """)
 
+            # Token tracking table - THE DATA MOAT 📊
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS tracked_tokens (
+                    address VARCHAR(100) PRIMARY KEY,
+                    symbol VARCHAR(50),
+                    name VARCHAR(200),
+                    decimals INTEGER DEFAULT 9,
+                    deployer VARCHAR(100),
+                    total_supply DECIMAL(40, 0),
+
+                    -- Snapshot at first detection
+                    first_seen TIMESTAMP DEFAULT NOW(),
+                    initial_holder_count INTEGER DEFAULT 0,
+                    initial_top_holder_pct DECIMAL(10, 2) DEFAULT 0,
+                    initial_liquidity_usd DECIMAL(20, 2) DEFAULT 0,
+
+                    -- Safety analysis
+                    safety_score INTEGER DEFAULT 50,
+                    lp_locked BOOLEAN DEFAULT FALSE,
+                    ownership_renounced BOOLEAN DEFAULT FALSE,
+
+                    -- Rug detection
+                    first_dev_sell_at TIMESTAMP,
+                    first_dev_sell_pct DECIMAL(10, 2),
+                    rugged BOOLEAN DEFAULT FALSE,
+                    rugged_at TIMESTAMP,
+
+                    -- Current state (updated periodically)
+                    current_holder_count INTEGER DEFAULT 0,
+                    current_top_holder_pct DECIMAL(10, 2) DEFAULT 0,
+                    current_price_usd DECIMAL(30, 18) DEFAULT 0,
+                    last_updated TIMESTAMP DEFAULT NOW()
+                )
+            """)
+
+            # Token events log - Track significant events
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS token_events (
+                    id SERIAL PRIMARY KEY,
+                    token_address VARCHAR(100) REFERENCES tracked_tokens(address),
+                    event_type VARCHAR(50),  -- 'deploy', 'first_sell', 'whale_dump', 'rug', 'moon'
+                    event_data JSONB,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+
             # Create indexes for performance
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_notarizations_user_id
@@ -816,6 +1057,28 @@ class Database:
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_lottery_entries_draw_id
                 ON lottery_entries(draw_id)
+            """)
+
+            # Token tracking indexes
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tracked_tokens_first_seen
+                ON tracked_tokens(first_seen DESC)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tracked_tokens_safety_score
+                ON tracked_tokens(safety_score)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tracked_tokens_rugged
+                ON tracked_tokens(rugged)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_token_events_address
+                ON token_events(token_address)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_token_events_type
+                ON token_events(event_type)
             """)
 
     @asynccontextmanager

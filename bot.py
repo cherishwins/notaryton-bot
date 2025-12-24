@@ -27,6 +27,9 @@ from social import social_poster, announce_seal
 from memescan.bot import router as memescan_router, get_client as get_memescan_client
 from memescan.twitter import memescan_twitter
 
+# Token crawler - THE DATA MOAT
+from crawler import crawler, start_crawler, stop_crawler
+
 # Load .env
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
@@ -3250,6 +3253,83 @@ async def api_rugscore(address: str):
         return {"success": False, "error": str(e), "score": 0}
 
 
+@app.get("/api/v1/tokens/stats")
+async def api_token_stats():
+    """
+    TOKEN TRACKING STATS - Data moat analytics.
+
+    Returns statistics about tracked tokens including:
+    - Total tokens tracked
+    - Rugged tokens count
+    - Safe tokens count (score >= 80)
+    - Tokens tracked today
+    - Overall rug rate percentage
+    """
+    try:
+        stats = await db.tokens.get_stats()
+        return {
+            "success": True,
+            "stats": stats,
+            "powered_by": "notaryton.com"
+        }
+    except Exception as e:
+        print(f"❌ Token stats error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/tokens/recent")
+async def api_recent_tokens(limit: int = 20):
+    """Get recently tracked tokens."""
+    try:
+        tokens = await db.tokens.get_recent(limit=min(limit, 100))
+        return {
+            "success": True,
+            "tokens": [
+                {
+                    "address": t.address,
+                    "symbol": t.symbol,
+                    "name": t.name,
+                    "safety_score": t.safety_score,
+                    "holder_count": t.current_holder_count,
+                    "top_holder_pct": t.current_top_holder_pct,
+                    "rugged": t.rugged,
+                    "first_seen": t.first_seen.isoformat() if t.first_seen else None,
+                }
+                for t in tokens
+            ],
+            "powered_by": "notaryton.com"
+        }
+    except Exception as e:
+        print(f"❌ Recent tokens error: {e}")
+        return {"success": False, "error": str(e), "tokens": []}
+
+
+@app.get("/api/v1/tokens/rugged")
+async def api_rugged_tokens(limit: int = 20):
+    """Get tokens that have been detected as rugs."""
+    try:
+        tokens = await db.tokens.get_rugged(limit=min(limit, 100))
+        return {
+            "success": True,
+            "count": len(tokens),
+            "tokens": [
+                {
+                    "address": t.address,
+                    "symbol": t.symbol,
+                    "name": t.name,
+                    "initial_holders": t.initial_holder_count,
+                    "initial_dev_pct": t.initial_top_holder_pct,
+                    "rugged_at": t.rugged_at.isoformat() if t.rugged_at else None,
+                }
+                for t in tokens
+            ],
+            "powered_by": "notaryton.com"
+        }
+    except Exception as e:
+        print(f"❌ Rugged tokens error: {e}")
+        return {"success": False, "error": str(e), "tokens": []}
+
+
 @app.get("/api/v1/memescan/pools")
 async def api_memescan_pools(limit: int = 10):
     """Get top liquidity pools."""
@@ -3792,6 +3872,11 @@ async def on_startup():
     # 🎰 Start lottery draw task (Sunday 20:00 UTC)
     asyncio.create_task(run_sunday_lottery_draw())
 
+    # 🕷️ Start token crawler (data moat)
+    if os.getenv("CRAWLER_ENABLED", "").lower() == "true":
+        asyncio.create_task(start_crawler())
+        print("✅ Token crawler started (building data moat)")
+
     os.makedirs("downloads", exist_ok=True)
 
 @app.on_event("shutdown")
@@ -3805,6 +3890,8 @@ async def on_shutdown():
         # Also close memescan API clients
         client = get_memescan_client()
         await client.close()
+    # Stop crawler if running
+    await stop_crawler()
     await db.disconnect()
     print("🛑 Bot sessions and database closed (webhooks preserved)")
 
