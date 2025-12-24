@@ -94,9 +94,14 @@ class TokenCrawler:
                     print(f"⚠️ Failed to analyze trending {token.symbol}: {e}")
 
     async def _analyze_and_store(self, address: str) -> Optional[TrackedToken]:
-        """Analyze a token and store results."""
+        """Analyze a token and store results with holder snapshots."""
         # Get detailed analysis
         analysis = await self.client.analyze_token_safety(address)
+
+        # Get holder data for snapshots
+        holders = await self.client.tonapi.get_jetton_holders(address, limit=20)
+        jetton_info = await self.client.tonapi.get_jetton_info(address)
+        total_supply = float(jetton_info.get("total_supply", 0) or 0) if jetton_info else 0
 
         # Convert safety level to score
         safety_score = 50  # Default
@@ -142,7 +147,9 @@ class TokenCrawler:
 
         # Log event for new token
         existing = await db.tokens.get(address)
-        if not existing or not existing.last_updated:
+        is_new = not existing or not existing.last_updated
+
+        if is_new:
             await db.tokens.add_event(
                 address,
                 "deploy",
@@ -154,7 +161,29 @@ class TokenCrawler:
                 }
             )
             print(f"✅ New token tracked: {analysis.symbol} (score: {safety_score})")
+
+            # Snapshot initial holders for new tokens
+            if holders and total_supply > 0:
+                count = await db.wallets.snapshot_holders(address, holders, total_supply)
+                print(f"   📸 Snapshotted {count} initial holders")
         else:
+            # For existing tokens, detect whale changes before snapshotting
+            if holders and total_supply > 0:
+                changes = await db.wallets.detect_whale_changes(
+                    address, holders, total_supply, threshold_pct=5.0
+                )
+
+                for change in changes:
+                    if change["type"] == "whale_entry":
+                        await db.tokens.add_event(address, "whale_entry", change)
+                        print(f"   🐋 Whale entry: {change['wallet'][:12]}... ({change['pct']:.1f}%)")
+                    elif change["type"] == "whale_exit":
+                        await db.tokens.add_event(address, "whale_exit", change)
+                        print(f"   🏃 Whale exit: {change['wallet'][:12]}... (sold {change['pct_sold']:.1f}%)")
+
+                # Snapshot current holders
+                await db.wallets.snapshot_holders(address, holders, total_supply)
+
             print(f"🔄 Updated: {analysis.symbol} (score: {safety_score})")
 
         return tracked

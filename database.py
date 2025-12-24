@@ -144,6 +144,28 @@ class TokenEvent:
     created_at: Optional[datetime] = None
 
 
+@dataclass
+class HolderSnapshot:
+    """Snapshot of a token holder at a point in time."""
+    id: Optional[int] = None
+    token_address: str = ""
+    wallet_address: str = ""
+    balance: float = 0
+    pct_of_supply: float = 0
+    rank: int = 0  # 1 = top holder
+    snapshot_at: Optional[datetime] = None
+
+
+@dataclass
+class KnownWallet:
+    """Known wallet with label (whale, exchange, dev, etc)."""
+    address: str = ""
+    label: str = ""  # 'whale', 'exchange', 'dev', 'influencer'
+    owner_name: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
 # ========================
 # REPOSITORY CLASSES
 # ========================
@@ -638,6 +660,192 @@ class ApiKeyRepository:
             await conn.execute("DELETE FROM api_keys WHERE key = $1", key)
 
 
+class WalletRepository:
+    """Repository for wallet tracking - PHASE 1 of Trader Intelligence"""
+
+    def __init__(self, pool: Pool):
+        self._pool = pool
+
+    async def snapshot_holders(
+        self,
+        token_address: str,
+        holders: List[Dict[str, Any]],
+        total_supply: float
+    ) -> int:
+        """Snapshot current top holders for a token. Returns count saved."""
+        if not holders or total_supply <= 0:
+            return 0
+
+        async with self._pool.acquire() as conn:
+            count = 0
+            for rank, holder in enumerate(holders[:20], 1):  # Top 20
+                wallet = holder.get("owner", {}).get("address", "") or holder.get("address", "")
+                balance = float(holder.get("balance", 0) or 0)
+
+                if not wallet or balance <= 0:
+                    continue
+
+                pct = (balance / total_supply) * 100
+
+                await conn.execute("""
+                    INSERT INTO holder_snapshots
+                    (token_address, wallet_address, balance, pct_of_supply, rank)
+                    VALUES ($1, $2, $3, $4, $5)
+                """, token_address, wallet, balance, pct, rank)
+                count += 1
+
+            return count
+
+    async def get_holder_history(
+        self,
+        token_address: str,
+        limit: int = 5
+    ) -> List[List[HolderSnapshot]]:
+        """Get recent holder snapshots grouped by snapshot time."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT DISTINCT ON (snapshot_at::date, wallet_address)
+                    id, token_address, wallet_address, balance, pct_of_supply, rank, snapshot_at
+                FROM holder_snapshots
+                WHERE token_address = $1
+                ORDER BY snapshot_at DESC, wallet_address
+                LIMIT $2
+            """, token_address, limit * 20)
+
+            return [HolderSnapshot(**dict(row)) for row in rows]
+
+    async def get_wallet_tokens(self, wallet_address: str) -> List[Dict[str, Any]]:
+        """Get all tokens a wallet has held."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT DISTINCT ON (token_address)
+                    hs.token_address, hs.balance, hs.pct_of_supply, hs.snapshot_at,
+                    t.symbol, t.name, t.safety_score, t.rugged
+                FROM holder_snapshots hs
+                JOIN tracked_tokens t ON hs.token_address = t.address
+                WHERE hs.wallet_address = $1
+                ORDER BY token_address, snapshot_at DESC
+            """, wallet_address)
+
+            return [dict(row) for row in rows]
+
+    async def detect_whale_changes(
+        self,
+        token_address: str,
+        current_holders: List[Dict[str, Any]],
+        total_supply: float,
+        threshold_pct: float = 5.0
+    ) -> List[Dict[str, Any]]:
+        """Detect significant holder changes (entries/exits)."""
+        if not current_holders or total_supply <= 0:
+            return []
+
+        changes = []
+
+        async with self._pool.acquire() as conn:
+            # Get last snapshot
+            last_snapshot = await conn.fetch("""
+                SELECT wallet_address, pct_of_supply
+                FROM holder_snapshots
+                WHERE token_address = $1
+                AND snapshot_at = (
+                    SELECT MAX(snapshot_at) FROM holder_snapshots WHERE token_address = $1
+                )
+            """, token_address)
+
+            old_holders = {row['wallet_address']: row['pct_of_supply'] for row in last_snapshot}
+
+            # Current holders
+            for holder in current_holders[:20]:
+                wallet = holder.get("owner", {}).get("address", "") or holder.get("address", "")
+                balance = float(holder.get("balance", 0) or 0)
+                if not wallet or balance <= 0:
+                    continue
+
+                current_pct = (balance / total_supply) * 100
+                old_pct = old_holders.get(wallet, 0)
+
+                # New whale entry
+                if wallet not in old_holders and current_pct >= threshold_pct:
+                    changes.append({
+                        "type": "whale_entry",
+                        "wallet": wallet,
+                        "pct": current_pct,
+                    })
+
+                # Significant increase
+                elif current_pct - old_pct >= threshold_pct:
+                    changes.append({
+                        "type": "whale_increase",
+                        "wallet": wallet,
+                        "old_pct": old_pct,
+                        "new_pct": current_pct,
+                    })
+
+            # Check for exits
+            current_wallets = {
+                holder.get("owner", {}).get("address", "") or holder.get("address", "")
+                for holder in current_holders[:20]
+            }
+
+            for wallet, old_pct in old_holders.items():
+                if wallet not in current_wallets and old_pct >= threshold_pct:
+                    changes.append({
+                        "type": "whale_exit",
+                        "wallet": wallet,
+                        "pct_sold": old_pct,
+                    })
+
+        return changes
+
+    async def label_wallet(
+        self,
+        address: str,
+        label: str,
+        owner_name: Optional[str] = None,
+        notes: Optional[str] = None
+    ) -> None:
+        """Label a known wallet."""
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO known_wallets (address, label, owner_name, notes)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (address) DO UPDATE SET
+                    label = $2, owner_name = COALESCE($3, known_wallets.owner_name),
+                    notes = COALESCE($4, known_wallets.notes)
+            """, address, label, owner_name, notes)
+
+    async def get_wallet_label(self, address: str) -> Optional[KnownWallet]:
+        """Get label for a wallet if known."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM known_wallets WHERE address = $1",
+                address
+            )
+            if row:
+                return KnownWallet(**dict(row))
+            return None
+
+    async def get_whales(self, min_appearances: int = 3) -> List[Dict[str, Any]]:
+        """Get wallets that appear as top holders frequently."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT
+                    wallet_address,
+                    COUNT(DISTINCT token_address) as token_count,
+                    AVG(pct_of_supply) as avg_pct,
+                    MAX(pct_of_supply) as max_pct
+                FROM holder_snapshots
+                WHERE rank <= 5
+                GROUP BY wallet_address
+                HAVING COUNT(DISTINCT token_address) >= $1
+                ORDER BY token_count DESC
+                LIMIT 100
+            """, min_appearances)
+
+            return [dict(row) for row in rows]
+
+
 class TokenRepository:
     """Repository for token tracking - THE DATA MOAT 📊"""
 
@@ -807,6 +1015,7 @@ class Database:
         self._api_keys: Optional[ApiKeyRepository] = None
         self._lottery: Optional[LotteryRepository] = None
         self._tokens: Optional[TokenRepository] = None
+        self._wallets: Optional[WalletRepository] = None
 
     @property
     def pool(self) -> Pool:
@@ -850,6 +1059,12 @@ class Database:
             raise RuntimeError("Database not connected. Call await db.connect() first.")
         return self._tokens
 
+    @property
+    def wallets(self) -> WalletRepository:
+        if self._wallets is None:
+            raise RuntimeError("Database not connected. Call await db.connect() first.")
+        return self._wallets
+
     async def connect(self, database_url: Optional[str] = None) -> None:
         """
         Connect to the database and initialize connection pool.
@@ -886,6 +1101,7 @@ class Database:
         self._api_keys = ApiKeyRepository(self._pool)
         self._lottery = LotteryRepository(self._pool)
         self._tokens = TokenRepository(self._pool)
+        self._wallets = WalletRepository(self._pool)
 
         # Initialize schema
         await self._init_schema()
@@ -903,6 +1119,7 @@ class Database:
             self._api_keys = None
             self._lottery = None
             self._tokens = None
+            self._wallets = None
             print("Database disconnected")
 
     async def _init_schema(self) -> None:
@@ -1025,6 +1242,30 @@ class Database:
                 )
             """)
 
+            # Holder snapshots - WALLET TRACKING (Phase 1)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS holder_snapshots (
+                    id SERIAL PRIMARY KEY,
+                    token_address VARCHAR(100) REFERENCES tracked_tokens(address),
+                    wallet_address VARCHAR(100) NOT NULL,
+                    balance DECIMAL(40, 0) DEFAULT 0,
+                    pct_of_supply DECIMAL(10, 4) DEFAULT 0,
+                    rank INTEGER DEFAULT 0,
+                    snapshot_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+
+            # Known wallets - Labeled whales, devs, exchanges
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS known_wallets (
+                    address VARCHAR(100) PRIMARY KEY,
+                    label VARCHAR(50),  -- 'whale', 'exchange', 'dev', 'influencer'
+                    owner_name VARCHAR(200),
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+
             # Create indexes for performance
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_notarizations_user_id
@@ -1079,6 +1320,26 @@ class Database:
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_token_events_type
                 ON token_events(event_type)
+            """)
+
+            # Holder snapshot indexes
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_holder_snapshots_token
+                ON holder_snapshots(token_address)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_holder_snapshots_wallet
+                ON holder_snapshots(wallet_address)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_holder_snapshots_time
+                ON holder_snapshots(snapshot_at DESC)
+            """)
+
+            # Known wallet indexes
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_known_wallets_label
+                ON known_wallets(label)
             """)
 
     @asynccontextmanager

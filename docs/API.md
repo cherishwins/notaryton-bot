@@ -327,7 +327,183 @@ async def monitor_launches():
 
 ---
 
+---
+
+## Token Intelligence API (MemeScan)
+
+### 4. Rug Score Lookup
+
+**GET** `/score/{address}`
+
+Get safety score and rug analysis for any TON token. **No authentication required.**
+
+#### Parameters
+- `address` (path): Token contract address (jetton master)
+
+#### Response
+```json
+{
+  "address": "EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG",
+  "symbol": "PEPE",
+  "name": "Pepe Token",
+  "safety_score": 75,
+  "safety_level": "warning",
+  "holder_count": 156,
+  "top_holder_pct": 23.5,
+  "liquidity_usd": 12500.00,
+  "rugged": false,
+  "first_seen": "2024-12-20T14:30:00Z"
+}
+```
+
+#### Safety Levels
+| Score | Level | Meaning |
+|-------|-------|---------|
+| 80-100 | `safe` | Low rug risk |
+| 50-79 | `warning` | Some concerns |
+| 0-49 | `danger` | High rug risk |
+
+#### cURL Example
+```bash
+curl https://notaryton.com/score/EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG
+```
+
+---
+
+### 5. Token Stats (Dashboard)
+
+**GET** `/api/v1/tokens/stats`
+
+Get aggregate statistics for all tracked tokens.
+
+#### Response
+```json
+{
+  "total_tracked": 156,
+  "rugged_count": 23,
+  "safe_count": 45,
+  "tracked_today": 12,
+  "rug_rate": 14.7
+}
+```
+
+---
+
+### 6. Recent Tokens
+
+**GET** `/api/v1/tokens/recent`
+
+Get recently discovered tokens.
+
+#### Query Parameters
+- `limit` (optional): Number of tokens (default: 50, max: 100)
+
+#### Response
+```json
+{
+  "tokens": [
+    {
+      "address": "EQ...",
+      "symbol": "DOGE",
+      "name": "Dogecoin TON",
+      "safety_score": 82,
+      "holder_count": 234,
+      "top_holder_pct": 12.3,
+      "liquidity_usd": 45000.00,
+      "first_seen": "2024-12-23T10:00:00Z",
+      "rugged": false
+    }
+  ],
+  "count": 50
+}
+```
+
+---
+
+### 7. Rugged Tokens
+
+**GET** `/api/v1/tokens/rugged`
+
+Get tokens that have been marked as rugged.
+
+#### Query Parameters
+- `limit` (optional): Number of tokens (default: 50)
+
+#### Response
+```json
+{
+  "tokens": [
+    {
+      "address": "EQ...",
+      "symbol": "SCAM",
+      "name": "ScamCoin",
+      "safety_score": 15,
+      "rugged": true,
+      "rugged_at": "2024-12-22T15:30:00Z",
+      "initial_holder_count": 50,
+      "current_holder_count": 3
+    }
+  ],
+  "count": 23
+}
+```
+
+---
+
+### 8. Live Token Feed (SSE)
+
+**GET** `/api/v1/tokens/live`
+
+Server-Sent Events stream for real-time token updates.
+
+#### Response Format
+```
+data: {"type": "stats", "total_tracked": 156, "safe_count": 45, "rugged_count": 23, "rug_rate": 14.7}
+
+data: {"type": "new_token", "address": "EQ...", "symbol": "PEPE", "safety_score": 75}
+
+data: {"type": "rug_detected", "address": "EQ...", "symbol": "SCAM"}
+```
+
+#### JavaScript Example
+```javascript
+const evtSource = new EventSource('/api/v1/tokens/live');
+
+evtSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+
+  if (data.type === 'stats') {
+    updateDashboard(data);
+  } else if (data.type === 'new_token') {
+    addTokenToFeed(data);
+  } else if (data.type === 'rug_detected') {
+    alertRugDetected(data);
+  }
+};
+```
+
+---
+
+### 9. Live Feed Dashboard
+
+**GET** `/feed`
+
+Web page with real-time cyberpunk dashboard showing live token activity.
+
+- Real-time stats updates via SSE
+- Token discovery feed
+- Rug detection alerts
+- Responsive design
+
+---
+
 ## Changelog
+
+### v2.2 (2025-12-23)
+- ✅ Token tracking API (`/api/v1/tokens/*`)
+- ✅ Rug score endpoint (`/score/{address}`)
+- ✅ Live SSE feed (`/api/v1/tokens/live`)
+- ✅ Live dashboard (`/feed`)
 
 ### v2.1 (2025-12-04)
 - ✅ TonAPI webhooks for instant payment detection
