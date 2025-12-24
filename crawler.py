@@ -188,9 +188,25 @@ class TokenCrawler:
                     if change["type"] == "whale_entry":
                         await db.tokens.add_event(address, "whale_entry", change)
                         print(f"   🐋 Whale entry: {change['wallet'][:12]}... ({change['pct']:.1f}%)")
+                        # Auto-post whale alert for big entries (>10%)
+                        await announce_whale(
+                            symbol=analysis.symbol,
+                            address=address,
+                            whale_wallet=change['wallet'],
+                            event_type="entry",
+                            pct=change['pct']
+                        )
                     elif change["type"] == "whale_exit":
                         await db.tokens.add_event(address, "whale_exit", change)
                         print(f"   🏃 Whale exit: {change['wallet'][:12]}... (sold {change['pct_sold']:.1f}%)")
+                        # Auto-post whale alert for big exits (>10%)
+                        await announce_whale(
+                            symbol=analysis.symbol,
+                            address=address,
+                            whale_wallet=change['wallet'],
+                            event_type="exit",
+                            pct=change['pct_sold']
+                        )
 
                 # Snapshot current holders
                 await db.wallets.snapshot_holders(address, holders, total_supply)
