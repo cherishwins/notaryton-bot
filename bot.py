@@ -3334,6 +3334,16 @@ async def api_rugged_tokens(limit: int = 20):
 # LIVE TOKEN FEED - SSE
 # ========================
 
+from decimal import Decimal
+
+def json_serialize(obj):
+    """Custom JSON serializer for types not serializable by default."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
 async def token_event_generator():
     """Server-Sent Events generator for live token feed."""
     last_count = 0
@@ -3364,7 +3374,7 @@ async def token_event_generator():
             }
             last_count = stats["total_tracked"]
 
-            yield f"data: {json.dumps(data)}\n\n"
+            yield f"data: {json.dumps(data, default=json_serialize)}\n\n"
             await asyncio.sleep(5)  # Update every 5 seconds
 
         except Exception as e:
