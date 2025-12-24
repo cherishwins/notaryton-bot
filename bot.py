@@ -52,12 +52,12 @@ DEPLOY_BOTS = ["@tondeployer", "@memelaunchbot", "@toncoinbot"]
 
 # Telegram Stars pricing (XTR currency)
 # 1 Star ≈ $0.02-0.05 depending on purchase method
-STARS_SINGLE_NOTARIZATION = 1   # 1 Star for single notarization
-STARS_MONTHLY_SUBSCRIPTION = 20  # 20 Stars for monthly unlimited (~$1.00)
+STARS_SINGLE_NOTARIZATION = 3   # 3 Stars for single notarization (~$0.10)
+STARS_MONTHLY_SUBSCRIPTION = 50  # 50 Stars for monthly unlimited (~$2.50)
 
 # TON pricing
-TON_SINGLE_SEAL = 0.015  # 0.015 TON per seal (~$0.05)
-TON_MONTHLY_SUB = 0.3    # 0.3 TON for monthly unlimited (~$1.00)
+TON_SINGLE_SEAL = 0.15   # 0.15 TON per seal (~$0.75) - still 20x cheaper than DeDust
+TON_MONTHLY_SUB = 1.0    # 1.0 TON for monthly unlimited (~$5.00)
 
 # Initialize bot and dispatcher (NotaryTON - professional)
 bot = Bot(token=BOT_TOKEN)
@@ -103,7 +103,7 @@ templates = Jinja2Templates(directory="templates")
 TRANSLATIONS = {
     "en": {
         "welcome": "🔐 **NotaryTON** - Blockchain Notarization\n\nSeal contracts, files, and screenshots on TON forever.\n\n**Commands:**\n/notarize - Seal a contract\n/status - Check your subscription\n/subscribe - Get unlimited seals\n/referral - Earn 5% commission\n/withdraw - Withdraw referral earnings\n/lang - Change language",
-        "no_sub": "⚠️ **Payment Required**\n\n1 Star or 0.015 TON to seal this.",
+        "no_sub": "⚠️ **Payment Required**\n\n3 Stars or 0.15 TON to seal this.",
         "sealed": "✅ **SEALED ON TON!**\n\nHash: `{hash}`\n\n🔗 Verify: {url}\n\nProof secured forever! 🔒",
         "withdraw_success": "✅ **Withdrawal Sent!**\n\n{amount} TON sent to your wallet.\nTX will appear in ~30 seconds.",
         "withdraw_min": "⚠️ Minimum withdrawal: 0.05 TON\n\nYour balance: {balance} TON",
@@ -112,8 +112,8 @@ TRANSLATIONS = {
         "referral_stats": "🎁 **Referral Program**\n\n**Your Link:**\n`{url}`\n\n**Commission:** 5%\n**Referrals:** {count}\n**Earnings:** {earnings} TON\n**Withdrawn:** {withdrawn} TON\n**Available:** {available} TON\n\n💡 Use /withdraw to cash out!",
         "status_active": "✅ **Subscription Active**\n\nExpires: {expiry}\n\nUnlimited seals enabled!",
         "status_inactive": "❌ **No Active Subscription**\n\nCredits: {credits} TON\n\nUse /subscribe for unlimited!",
-        "photo_prompt": "📸 **Nice screenshot!**\n\n1 Star to seal it on TON forever.",
-        "file_prompt": "📄 **Got your file!**\n\n1 Star to seal it on TON forever.",
+        "photo_prompt": "📸 **Nice screenshot!**\n\n3 Stars to seal it on TON forever.",
+        "file_prompt": "📄 **Got your file!**\n\n3 Stars to seal it on TON forever.",
         # Agent 10: New strings for enhanced UX
         "sealing_progress": "⏳ **SEALING TO BLOCKCHAIN...**\n\nYour file is being timestamped on TON.\nThis takes 5-15 seconds.",
         "network_busy": "⚠️ **TON Network Busy**\n\nWe're retrying automatically. Please wait.",
@@ -124,7 +124,7 @@ TRANSLATIONS = {
     },
     "ru": {
         "welcome": "🔐 **NotaryTON** - Блокчейн Нотаризация\n\nПечать контрактов, файлов и скриншотов на TON навсегда.\n\n**Команды:**\n/notarize - Запечатать контракт\n/status - Проверить подписку\n/subscribe - Безлимит\n/referral - Заработай 5%\n/withdraw - Вывести заработок\n/lang - Сменить язык",
-        "no_sub": "⚠️ **Требуется оплата**\n\n1 Звезда или 0.015 TON для печати.",
+        "no_sub": "⚠️ **Требуется оплата**\n\n3 Звезды или 0.15 TON для печати.",
         "sealed": "✅ **ЗАПЕЧАТАНО НА TON!**\n\nХеш: `{hash}`\n\n🔗 Проверить: {url}\n\nДоказательство сохранено навсегда! 🔒",
         "withdraw_success": "✅ **Вывод отправлен!**\n\n{amount} TON отправлено на ваш кошелек.\nTX появится через ~30 секунд.",
         "withdraw_min": "⚠️ Минимальный вывод: 0.05 TON\n\nВаш баланс: {balance} TON",
@@ -133,8 +133,8 @@ TRANSLATIONS = {
         "referral_stats": "🎁 **Реферальная Программа**\n\n**Ваша ссылка:**\n`{url}`\n\n**Комиссия:** 5%\n**Рефералы:** {count}\n**Заработано:** {earnings} TON\n**Выведено:** {withdrawn} TON\n**Доступно:** {available} TON\n\n💡 Используйте /withdraw для вывода!",
         "status_active": "✅ **Подписка Активна**\n\nИстекает: {expiry}\n\nБезлимитные печати включены!",
         "status_inactive": "❌ **Нет Активной Подписки**\n\nКредиты: {credits} TON\n\nИспользуйте /subscribe для безлимита!",
-        "photo_prompt": "📸 **Отличный скриншот!**\n\n1 Звезда чтобы запечатать на TON навсегда.",
-        "file_prompt": "📄 **Файл получен!**\n\n1 Звезда чтобы запечатать на TON навсегда.",
+        "photo_prompt": "📸 **Отличный скриншот!**\n\n3 Звезды чтобы запечатать на TON навсегда.",
+        "file_prompt": "📄 **Файл получен!**\n\n3 Звезды чтобы запечатать на TON навсегда.",
         # Agent 10: New strings for enhanced UX
         "sealing_progress": "⏳ **ЗАПЕЧАТЫВАНИЕ В БЛОКЧЕЙН...**\n\nВаш файл получает временную метку на TON.\nЭто занимает 5-15 секунд.",
         "network_busy": "⚠️ **Сеть TON занята**\n\nМы автоматически повторяем. Пожалуйста, подождите.",
@@ -145,7 +145,7 @@ TRANSLATIONS = {
     },
     "zh": {
         "welcome": "🔐 **NotaryTON** - 区块链公证\n\n在TON上永久封存合约、文件和截图。\n\n**命令:**\n/notarize - 封存合约\n/status - 查看订阅\n/subscribe - 无限封存\n/referral - 赚取5%佣金\n/withdraw - 提取收益\n/lang - 更改语言",
-        "no_sub": "⚠️ **需要付款**\n\n1星或0.015 TON来封存。",
+        "no_sub": "⚠️ **需要付款**\n\n3星或0.15 TON来封存。",
         "sealed": "✅ **已封存到TON!**\n\n哈希: `{hash}`\n\n🔗 验证: {url}\n\n证明已永久保存! 🔒",
         "withdraw_success": "✅ **提款已发送!**\n\n{amount} TON已发送到您的钱包。\n交易将在~30秒后显示。",
         "withdraw_min": "⚠️ 最低提款: 0.05 TON\n\n您的余额: {balance} TON",
@@ -840,7 +840,7 @@ async def poll_wallet_for_payments():
                                     except Exception:
                                         pass
 
-                        # Check if it's a single notarization payment (0.015 TON)
+                        # Check if it's a single notarization payment (0.15 TON)
                         elif amount_ton >= 0.014:  # Allow small variance
                             # Add to database as paid credit
                             await db.users.ensure_exists(user_id)
@@ -952,7 +952,7 @@ async def cmd_start(message: types.Message):
         "• /status - Your stats\n"
         "• /notarize - Seal a file\n"
         "• /referral - Earn 5%\n\n"
-        "💰 ⭐ 1 Star per seal | 20 Stars/mo unlimited"
+        "💰 ⭐ 3 Stars per seal | 50 Stars/mo unlimited"
     )
     
     await message.answer(welcome_msg, parse_mode="Markdown")
@@ -1053,7 +1053,7 @@ async def process_ton_single(callback: types.CallbackQuery):
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"**Step 1:** Copy this address\n"
         f"`{SERVICE_TON_WALLET}`\n\n"
-        f"**Step 2:** Send exactly **0.015 TON**\n\n"
+        f"**Step 2:** Send exactly **0.15 TON**\n\n"
         f"**Step 3:** Add this memo:\n"
         f"`{user_id}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -1647,17 +1647,17 @@ async def cmd_notarize(message: types.Message):
     if not has_sub and not has_credit:
         # Offer payment options
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="⭐ Pay 1 Star", callback_data="pay_stars_single")],
-            [types.InlineKeyboardButton(text="💎 Pay 0.015 TON", callback_data="pay_ton_single")],
+            [types.InlineKeyboardButton(text="⭐ Pay 3 Stars", callback_data="pay_stars_single")],
+            [types.InlineKeyboardButton(text="💎 Pay 0.15 TON", callback_data="pay_ton_single")],
             [types.InlineKeyboardButton(text="🚀 Unlimited (20 Stars/mo)", callback_data="pay_stars_sub")]
         ])
 
         await message.answer(
             "⚠️ **Payment Required**\n\n"
             "Choose how to pay for this notarization:\n\n"
-            "⭐ **1 Star** - Quick & easy\n"
-            "💎 **0.015 TON** - Native crypto\n"
-            "🚀 **20 Stars/mo** - Unlimited access\n",
+            "⭐ **3 Stars** - Quick & easy\n"
+            "💎 **0.15 TON** - Native crypto\n"
+            "🚀 **50 Stars/mo** - Unlimited access\n",
             parse_mode="Markdown",
             reply_markup=keyboard
         )
@@ -1692,8 +1692,8 @@ async def deduct_credit(user_id: int):
 def get_payment_keyboard():
     """Return standard payment keyboard"""
     return types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="⭐ Pay 1 Star", callback_data="pay_stars_single")],
-        [types.InlineKeyboardButton(text="💎 Pay 0.015 TON", callback_data="pay_ton_single")],
+        [types.InlineKeyboardButton(text="⭐ Pay 3 Stars", callback_data="pay_stars_single")],
+        [types.InlineKeyboardButton(text="💎 Pay 0.15 TON", callback_data="pay_ton_single")],
         [types.InlineKeyboardButton(text="🚀 Unlimited (20 Stars/mo)", callback_data="pay_stars_sub")]
     ])
 
@@ -1771,7 +1771,7 @@ async def handle_text_message(message: types.Message):
             await message.reply(
                 f"🔍 **New Launch Detected!**\n\n"
                 f"Contract: `{contract_id[:20]}...`\n\n"
-                f"⚠️ Send 0.015 TON to `{SERVICE_TON_WALLET}` (memo: `{user_id}`) to notarize!\n"
+                f"⚠️ Send 0.15 TON to `{SERVICE_TON_WALLET}` (memo: `{user_id}`) to notarize!\n"
                 f"Or /subscribe for unlimited access.",
                 parse_mode="Markdown"
             )
@@ -1828,9 +1828,9 @@ async def handle_document(message: types.Message):
         await message.answer(
             "⚠️ **Payment Required to Notarize**\n\n"
             "Choose how to pay:\n\n"
-            "⭐ **1 Star** - Quick & easy\n"
-            "💎 **0.015 TON** - Native crypto\n"
-            "🚀 **20 Stars/mo** - Unlimited access\n",
+            "⭐ **3 Stars** - Quick & easy\n"
+            "💎 **0.15 TON** - Native crypto\n"
+            "🚀 **50 Stars/mo** - Unlimited access\n",
             parse_mode="Markdown",
             reply_markup=get_payment_keyboard()
         )
@@ -1882,7 +1882,7 @@ async def handle_photo(message: types.Message):
     if not can_notarize:
         await message.answer(
             "📸 **Nice screenshot!**\n\n"
-            "1 Star to seal it on TON forever.\n"
+            "3 Stars to seal it on TON forever.\n"
             "Proof you were there. 🔐",
             parse_mode="Markdown",
             reply_markup=get_payment_keyboard()
@@ -2076,7 +2076,7 @@ if memeseal_dp:
         if user_id not in pending_files:
             await callback.message.answer(
                 f"💎 **Pay with TON**\n\n"
-                f"Send **0.015 TON** to:\n"
+                f"Send **0.15 TON** to:\n"
                 f"`{SERVICE_TON_WALLET}`\n\n"
                 f"**Memo:** `{user_id}`\n\n"
                 f"Then send your file - I'll seal it instantly! 🐸⚡",
@@ -2561,8 +2561,8 @@ if memeseal_dp:
             }
 
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-                [types.InlineKeyboardButton(text="⭐ Pay 1 Star & Seal Now", callback_data="ms_pay_stars_single")],
-                [types.InlineKeyboardButton(text="💎 Pay 0.015 TON instead", callback_data="ms_pay_ton_single")],
+                [types.InlineKeyboardButton(text="⭐ Pay 3 Stars & Seal Now", callback_data="ms_pay_stars_single")],
+                [types.InlineKeyboardButton(text="💎 Pay 0.15 TON instead", callback_data="ms_pay_ton_single")],
                 [types.InlineKeyboardButton(text="🚀 Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
             ])
             await message.answer(
@@ -2672,8 +2672,8 @@ if memeseal_dp:
             }
 
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-                [types.InlineKeyboardButton(text="⭐ Pay 1 Star & Seal Now", callback_data="ms_pay_stars_single")],
-                [types.InlineKeyboardButton(text="💎 Pay 0.015 TON instead", callback_data="ms_pay_ton_single")],
+                [types.InlineKeyboardButton(text="⭐ Pay 3 Stars & Seal Now", callback_data="ms_pay_stars_single")],
+                [types.InlineKeyboardButton(text="💎 Pay 0.15 TON instead", callback_data="ms_pay_ton_single")],
                 [types.InlineKeyboardButton(text="🚀 Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
             ])
             await message.answer(
@@ -3173,6 +3173,81 @@ async def api_memescan_check(address: str):
     except Exception as e:
         print(f"❌ MemeScan check error: {e}")
         return {"success": False, "error": str(e)}
+
+
+@app.get("/score/{address}")
+@app.get("/api/v1/rugscore/{address}")
+async def api_rugscore(address: str):
+    """
+    RUG SCORE API - Returns 0-100 safety score for any TON token.
+
+    Score breakdown:
+    - 90-100: SAFE (green badge) - Low holder concentration, many holders
+    - 60-89: WARNING (yellow badge) - Some concentration or few holders
+    - 0-59: DANGER (red badge) - High concentration, likely rug risk
+
+    Free to use. Powered by notaryton.com
+    """
+    try:
+        # Validate address format
+        if not (address.startswith("EQ") or address.startswith("UQ") or address.startswith("0:")):
+            return {"success": False, "error": "Invalid TON address format", "score": 0}
+
+        client = get_memescan_client()
+        token = await client.analyze_token_safety(address)
+
+        # Calculate 0-100 score based on safety factors
+        score = 100
+
+        # Deduct for holder concentration (biggest factor)
+        if token.dev_wallet_percent > 50:
+            score -= 50  # Massive red flag
+        elif token.dev_wallet_percent > 30:
+            score -= 35
+        elif token.dev_wallet_percent > 20:
+            score -= 20
+        elif token.dev_wallet_percent > 10:
+            score -= 10
+
+        # Deduct for low holder count
+        if token.holder_count < 5:
+            score -= 30
+        elif token.holder_count < 10:
+            score -= 20
+        elif token.holder_count < 50:
+            score -= 10
+        elif token.holder_count < 100:
+            score -= 5
+
+        # Determine badge color
+        if score >= 90:
+            badge = "green"
+            verdict = "SAFE"
+        elif score >= 60:
+            badge = "yellow"
+            verdict = "WARNING"
+        else:
+            badge = "red"
+            verdict = "DANGER"
+
+        return {
+            "success": True,
+            "score": max(0, score),
+            "badge": badge,
+            "verdict": verdict,
+            "token": {
+                "address": token.address,
+                "symbol": token.symbol,
+                "name": token.name,
+                "holder_count": token.holder_count,
+                "top_wallet_percent": round(token.dev_wallet_percent, 1),
+            },
+            "warnings": token.safety_warnings,
+            "powered_by": "notaryton.com"
+        }
+    except Exception as e:
+        print(f"❌ Rug score error: {e}")
+        return {"success": False, "error": str(e), "score": 0}
 
 
 @app.get("/api/v1/memescan/pools")

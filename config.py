@@ -39,12 +39,12 @@ TONAPI_WEBHOOK_SECRET = os.getenv("TONAPI_WEBHOOK_SECRET", "")
 # =============================================================================
 # Telegram Stars pricing (XTR currency)
 # 1 Star ~ $0.02-0.05 depending on purchase method
-STARS_SINGLE_NOTARIZATION = 1   # 1 Star for single notarization
-STARS_MONTHLY_SUBSCRIPTION = 20  # 20 Stars for monthly unlimited (~$1.00)
+STARS_SINGLE_NOTARIZATION = 3   # 3 Stars for single notarization (~$0.10)
+STARS_MONTHLY_SUBSCRIPTION = 50  # 50 Stars for monthly unlimited (~$2.50)
 
 # TON pricing
-TON_SINGLE_SEAL = 0.015  # 0.015 TON per seal (~$0.05)
-TON_MONTHLY_SUB = 0.3    # 0.3 TON for monthly unlimited (~$1.00)
+TON_SINGLE_SEAL = 0.15   # 0.15 TON per seal (~$0.75) - still 20x cheaper than DeDust
+TON_MONTHLY_SUB = 1.0    # 1.0 TON for monthly unlimited (~$5.00)
 
 # Minimum withdrawal amount
 MIN_WITHDRAWAL_TON = 0.05
