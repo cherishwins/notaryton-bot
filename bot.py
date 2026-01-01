@@ -3184,6 +3184,11 @@ async def api_rugscore(address: str):
     """
     RUG SCORE API - Returns 0-100 safety score for any TON token.
 
+    Now with ENTITY DETECTION from ton-labels (2,958 known addresses):
+    - Scammers: Instant 0 score, red badge, CRITICAL warning
+    - CEX/DEX: High score, verified entity badge
+    - Validators: Highest trust score
+
     Score breakdown:
     - 90-100: SAFE (green badge) - Low holder concentration, many holders
     - 60-89: WARNING (yellow badge) - Some concentration or few holders
@@ -3196,6 +3201,66 @@ async def api_rugscore(address: str):
         if not (address.startswith("EQ") or address.startswith("UQ") or address.startswith("0:")):
             return {"success": False, "error": "Invalid TON address format", "score": 0}
 
+        # ENTITY DETECTION: Check known_wallets first
+        known = await db.wallets.get_wallet_label(address)
+        if known:
+            import json
+            extra = {}
+            if known.notes:
+                try:
+                    extra = json.loads(known.notes)
+                except:
+                    pass
+
+            category = known.label
+            entity_scores = {
+                'validator': 95, 'cex': 85, 'dex': 80, 'bridge': 75,
+                'liquid_staking': 80, 'lending': 75, 'infrastructure': 80,
+                'fund': 70, 'merchant': 65, 'gaming': 60, 'tradingbot': 60,
+                'scammer': 0, 'scripted-activity': 40,
+            }
+
+            if category == 'scammer':
+                subcategory = extra.get('subcategory', '')
+                warnings = [f"🚨 KNOWN SCAMMER: {known.owner_name or 'Unknown'}"]
+                if subcategory:
+                    warnings.append(f"⚠️ Type: {subcategory.replace('_', ' ').title()}")
+                if extra.get('description'):
+                    warnings.append(f"ℹ️ {extra['description']}")
+
+                return {
+                    "success": True,
+                    "score": 0,
+                    "badge": "red",
+                    "verdict": "SCAMMER",
+                    "token": {"address": address, "symbol": "⚠️", "name": known.owner_name or "SCAMMER", "holder_count": 0, "top_wallet_percent": 0},
+                    "warnings": warnings,
+                    "entityInfo": {"category": category, "label": known.owner_name, "website": extra.get('website')},
+                    "powered_by": "notaryton.com"
+                }
+
+            # Known good entity
+            score = entity_scores.get(category, 60)
+            badge = "green" if score >= 80 else "yellow"
+            verdict = "VERIFIED" if score >= 80 else "KNOWN"
+
+            return {
+                "success": True,
+                "score": score,
+                "badge": badge,
+                "verdict": verdict,
+                "token": {"address": address, "symbol": "✓", "name": known.owner_name or category.upper(), "holder_count": 0, "top_wallet_percent": 0},
+                "warnings": [],
+                "entityInfo": {
+                    "category": category,
+                    "label": known.owner_name,
+                    "website": extra.get('website'),
+                    "verified": True
+                },
+                "powered_by": "notaryton.com"
+            }
+
+        # No known entity - proceed with token analysis
         client = get_memescan_client()
         token = await client.analyze_token_safety(address)
 
@@ -4502,6 +4567,55 @@ async def seed_lottery(amount_stars: int = 2500, secret: str = ""):
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.post("/admin/import-ton-labels")
+async def import_ton_labels(secret: str = ""):
+    """Import ton-labels data into known_wallets table (one-time migration)"""
+    if secret != ADMIN_SECRET:
+        return {"error": "Unauthorized"}
+
+    import json
+    from pathlib import Path
+
+    # Load the ton-labels data
+    labels_path = Path(__file__).parent / "scripts" / "ton-labels-compiled.json"
+    if not labels_path.exists():
+        return {"error": f"Labels file not found at {labels_path}"}
+
+    with open(labels_path) as f:
+        data = json.load(f)
+
+    imported = 0
+    skipped = 0
+
+    for address, info in data['addresses'].items():
+        label = info.get('category', 'unknown')
+        owner_name = info.get('label') or info.get('organization', '')
+
+        notes_data = {
+            'website': info.get('website'),
+            'subcategory': info.get('subcategory'),
+            'description': info.get('description'),
+            'tags': info.get('tags', []),
+            'source': 'ton-labels'
+        }
+        notes_data = {k: v for k, v in notes_data.items() if v}
+        notes = json.dumps(notes_data) if notes_data else None
+
+        try:
+            await db.wallets.label_wallet(address, label, owner_name, notes)
+            imported += 1
+        except Exception as e:
+            skipped += 1
+
+    return {
+        "success": True,
+        "imported": imported,
+        "skipped": skipped,
+        "total": data['total'],
+        "stats": data['stats']
+    }
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
