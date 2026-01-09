@@ -56,6 +56,8 @@ cd ~/dev/projects/personal/ton/memescan-astro && vercel --prod
 | File | What |
 |------|------|
 | `docs/MASTER.md` | Full product reference |
+| `docs/WHALE_SWARM_INTEL.md` | Whale tactics, ecosystem choke points, swarm playbook |
+| `docs/STRATEGY.md` | Business model, GTM, network effects |
 | `docs/ENV-VARS.md` | All API keys needed |
 | `bot.py` | Main bot code |
 | `database.py` | All DB schemas |
