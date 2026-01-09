@@ -12,7 +12,7 @@
 
 ---
 
-## CURRENT STATUS (Dec 24, 2025)
+## CURRENT STATUS (Jan 8, 2026)
 
 ### LIVE
 - ✅ @MemeSealTON_bot - Casino + lottery
@@ -26,7 +26,13 @@
 - 🔄 Waiting on grant responses (STON.fi, swap.coffee)
 - 🔄 TON Builders Analytics - SDK added, waiting for data
 
+### AUDIT COMPLETED
+- 📋 See `docs/AUDIT_REPORT_2026_01.md` for full codebase audit
+- 🔒 Fixed hardcoded API keys in config.py
+- ⚠️ Action needed: Rotate TonAPI keys at tonconsole.com
+
 ### NEXT UP
+- [ ] Rotate TonAPI keys (SECURITY - exposed in git history)
 - [ ] Test casino Mini App to verify analytics tracking
 - [ ] KOL tracker feature completion
 - [ ] TON ID integration (need CLIENT_ID from @boldov)
@@ -55,6 +61,7 @@ cd ~/dev/projects/personal/ton/memescan-astro && vercel --prod
 
 | File | What |
 |------|------|
+| `docs/AUDIT_REPORT_2026_01.md` | Latest codebase audit with action items |
 | `docs/MASTER.md` | Full product reference |
 | `docs/WHALE_SWARM_INTEL.md` | Whale tactics, ecosystem choke points, swarm playbook |
 | `docs/X402_FLASH_AUCTION_INTEL.md` | Payment protocols, flash auction model, AI agent automation |
