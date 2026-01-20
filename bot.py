@@ -761,12 +761,27 @@ async def poll_wallet_for_payments():
 
     consecutive_errors = 0
     max_backoff = 300  # Max 5 minutes between retries
+    
+    # Reuse client to reduce memory churn (only recreate on errors)
+    client = None
+    client_uses = 0
+    MAX_CLIENT_USES = 20  # Recreate after 20 uses to prevent memory buildup
 
     while True:
-        client = None
         try:
-            client = LiteBalancer.from_mainnet_config(trust_level=1)
-            await asyncio.wait_for(client.start_up(), timeout=30)  # 30s timeout
+            # Create or recreate client as needed
+            if client is None or client_uses >= MAX_CLIENT_USES:
+                if client:
+                    try:
+                        await client.close_all()
+                    except Exception:
+                        pass
+                client = LiteBalancer.from_mainnet_config(trust_level=1)
+                await asyncio.wait_for(client.start_up(), timeout=30)
+                client_uses = 0
+                print("🔗 LiteBalancer client (re)initialized")
+            
+            client_uses += 1
 
             # Get wallet address
             wallet_address = Address(SERVICE_TON_WALLET)
@@ -881,6 +896,13 @@ async def poll_wallet_for_payments():
         except asyncio.TimeoutError:
             consecutive_errors += 1
             print(f"⚠️ Wallet polling timeout (attempt {consecutive_errors})")
+            # Force client recreation on timeout
+            if client:
+                try:
+                    await client.close_all()
+                except Exception:
+                    pass
+            client = None
         except Exception as e:
             consecutive_errors += 1
             error_msg = str(e)
@@ -895,12 +917,13 @@ async def poll_wallet_for_payments():
                 consecutive_errors = 0  # Reset since we fixed the issue
             else:
                 print(f"❌ Error polling wallet (attempt {consecutive_errors}): {error_msg}")
-        finally:
+            # Force client recreation on error
             if client:
                 try:
                     await client.close_all()
                 except Exception:
                     pass
+            client = None
 
         # Exponential backoff on errors (30s -> 60s -> 120s -> 240s -> 300s max)
         if consecutive_errors > 0:
@@ -908,7 +931,7 @@ async def poll_wallet_for_payments():
             print(f"🔄 Retrying in {backoff}s...")
             await asyncio.sleep(backoff)
         else:
-            await asyncio.sleep(30)  # Normal poll interval
+            await asyncio.sleep(180)  # Normal poll interval (3 min to reduce memory churn)
 
 # ========================
 # BOT HANDLERS
