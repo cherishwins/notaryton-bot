@@ -1,0 +1,88 @@
+{
+  "team": "REVENUE_SPRINT",
+  "goal": "Ship monetization features fast. Every day without revenue is a day closer to death.",
+  "agents": [
+    {
+      "role": "lead",
+      "agent": "PAYMENT_ARCHITECT",
+      "human": "Patrick Collison",
+      "focus": "Checkout flow, payment UX, pricing psychology",
+      "skill_file": "skills/PAYMENT_ARCHITECT.md"
+    },
+    {
+      "role": "support",
+      "agent": "BACKEND_PRAGMATIST",
+      "human": "Paul Graham",
+      "focus": "Keep implementation simple, ship fast, iterate",
+      "skill_file": "skills/BACKEND_PRAGMATIST.md"
+    },
+    {
+      "role": "support",
+      "agent": "FRONTEND_ARCHITECT",
+      "human": "Guillermo Rauch",
+      "focus": "Fast UI, instant feedback, skeleton loaders",
+      "skill_file": "skills/FRONTEND_ARCHITECT.md"
+    }
+  ],
+  "conflict_resolution": {
+    "priority_order": ["payment", "simplicity", "performance"],
+    "rules": [
+      "If payment UX and simplicity conflict, optimize for payment (money > code beauty)",
+      "If simplicity and performance conflict, ship simple first (iterate later)",
+      "Patrick has final say on anything touching checkout",
+      "Paul has final say on architecture decisions",
+      "Guillermo has final say on UI implementation details"
+    ]
+  },
+  "execution_phases": [
+    {
+      "phase": 1,
+      "name": "Design Payment Flow",
+      "lead": "Patrick Collison",
+      "outputs": ["User flow diagram", "Price tiers", "Error states"]
+    },
+    {
+      "phase": 2,
+      "name": "Backend Implementation",
+      "lead": "Paul Graham",
+      "outputs": ["API endpoint", "Database schema", "Webhook handler"]
+    },
+    {
+      "phase": 3,
+      "name": "Frontend Implementation",
+      "lead": "Guillermo Rauch",
+      "outputs": ["Purchase UI", "Loading states", "Success/error handling"]
+    },
+    {
+      "phase": 4,
+      "name": "Integration Test",
+      "lead": "All",
+      "outputs": ["End-to-end flow working", "Edge cases handled"]
+    }
+  ],
+  "success_metrics": [
+    {
+      "metric": "checkout_completion_rate",
+      "target": "> 70%",
+      "owner": "Patrick"
+    },
+    {
+      "metric": "time_to_first_purchase",
+      "target": "< 2 minutes from app open",
+      "owner": "Guillermo"
+    },
+    {
+      "metric": "payment_failure_rate",
+      "target": "< 5%",
+      "owner": "Paul"
+    }
+  ],
+  "anti_patterns": [
+    "Adding features that don't directly increase revenue",
+    "Over-engineering the backend for 'future scalability'",
+    "Polishing UI before basic flow works",
+    "A/B testing before having any users",
+    "Building admin dashboards before revenue"
+  ],
+  "quick_start": "READ all three skill files. Start with Patrick's payment flow design. Paul builds the simplest backend. Guillermo makes it feel instant."
+}

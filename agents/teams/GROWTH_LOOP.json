@@ -1,0 +1,95 @@
+{
+  "team": "GROWTH_LOOP",
+  "goal": "Build viral mechanics that spread themselves. Every feature should recruit new users.",
+  "agents": [
+    {
+      "role": "lead",
+      "agent": "GROWTH_HACKER",
+      "human": "Nikita Bier",
+      "focus": "Viral loops, FOMO mechanics, retention hooks",
+      "skill_file": "skills/GROWTH_HACKER.md"
+    },
+    {
+      "role": "support",
+      "agent": "DEGEN_CULTURE",
+      "human": "Ansem",
+      "focus": "Authentic messaging, meme culture, community vibes",
+      "skill_file": "skills/DEGEN_CULTURE.md"
+    },
+    {
+      "role": "support",
+      "agent": "FRONTEND_ARCHITECT",
+      "human": "Guillermo Rauch",
+      "focus": "Shareable UIs, fast loading share cards, social meta tags",
+      "skill_file": "skills/FRONTEND_ARCHITECT.md"
+    }
+  ],
+  "conflict_resolution": {
+    "priority_order": ["virality", "authenticity", "performance"],
+    "rules": [
+      "If virality and authenticity conflict, find the authentic viral path (fake virality backfires)",
+      "If authenticity and performance conflict, ship authentic even if slower",
+      "Nikita has final say on mechanics and triggers",
+      "Ansem has final say on messaging and tone",
+      "Guillermo has final say on technical implementation"
+    ]
+  },
+  "viral_mechanics_library": [
+    {
+      "mechanic": "Social Proof Loop",
+      "description": "User wins → Auto-post → Friends see → Friends join",
+      "example": "Lottery winner auto-tweeted with referral link"
+    },
+    {
+      "mechanic": "Friend Activity Feed",
+      "description": "Show what friends are doing, not just global activity",
+      "example": "'3 friends sealed predictions this week'"
+    },
+    {
+      "mechanic": "FOMO Countdown",
+      "description": "Time-limited opportunities with visible timers",
+      "example": "Lottery drawing in 2h 14m... pot at 1,337 ⭐"
+    },
+    {
+      "mechanic": "Streak Rewards",
+      "description": "Consecutive day rewards that compound",
+      "example": "7-day seal streak = double lottery tickets"
+    },
+    {
+      "mechanic": "Leaderboards",
+      "description": "Public rankings that drive competition",
+      "example": "Top 10 referrers this month"
+    }
+  ],
+  "content_templates": {
+    "lottery_hype": "🎰 POT UPDATE\n\n{pot_size} ⭐ and CLIMBING\n\nDrawing in {time_remaining}\nYour tickets: {ticket_count}\n\nLFG 🐸",
+    "winner_announcement": "🚨 WE HAVE A WINNER 🚨\n\n@{winner} just took home {amount} ⭐\n\nThey sealed {seal_count} predictions this week.\nThey believed. They WON.\n\nAre you next? 👀\n\n{referral_link}",
+    "big_win_casino": "🐸🐸🐸 JACKPOT ALERT 🐸🐸🐸\n\n@{winner} just hit {multiplier}x on {game}\n\nBet: {bet} chips\nWon: {win} chips\n\nTHE FROG PROVIDES 🙏\n\n{casino_link}",
+    "sealed_prediction": "📜 SEALED ON TON\n\n@{user} predicts: \"{prediction}\"\n\nSealed: {timestamp}\nVerify: {verify_link}\n\n🔐 Seal your calls → {bot_link}"
+  },
+  "success_metrics": [
+    {
+      "metric": "viral_coefficient",
+      "target": "> 1.0 (each user brings > 1 new user)",
+      "owner": "Nikita"
+    },
+    {
+      "metric": "share_rate",
+      "target": "> 20% of winners share",
+      "owner": "Ansem"
+    },
+    {
+      "metric": "d7_retention",
+      "target": "> 30%",
+      "owner": "Nikita"
+    }
+  ],
+  "anti_patterns": [
+    "Fake scarcity that users see through",
+    "Spammy notifications that get muted",
+    "Corporate messaging in a degen product",
+    "Features nobody talks about at dinner",
+    "Asking users to share instead of making sharing feel like bragging"
+  ],
+  "quick_start": "READ all three skill files. Nikita designs the mechanic. Ansem writes the copy. Guillermo builds the shareable component."
+}

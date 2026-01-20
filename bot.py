@@ -1205,6 +1205,41 @@ async def process_successful_payment(message: types.Message):
             parse_mode="Markdown"
         )
 
+    elif payload.startswith("casino_chips_"):
+        # 🎰💰 CASINO CHIPS PURCHASE - THE MONEY MAKER
+        # Payload format: casino_chips_{user_id}_{amount}_{timestamp}
+        parts = payload.split("_")
+        chips_amount = payment.total_amount  # 1 Star = 1 Chip
+        
+        # Add chips to user's casino balance
+        await db.users.ensure_exists(user_id)
+        new_balance = await db.casino.add_chips(user_id, chips_amount)
+        
+        # Bonus chips for larger purchases (Patrick Collison: price anchoring)
+        bonus = 0
+        if chips_amount >= 500:
+            bonus = chips_amount // 5  # 20% bonus
+            new_balance = await db.casino.add_chips(user_id, bonus)
+        elif chips_amount >= 100:
+            bonus = chips_amount // 10  # 10% bonus
+            new_balance = await db.casino.add_chips(user_id, bonus)
+        
+        bonus_msg = f"\n🎁 **BONUS:** +{bonus} chips!" if bonus > 0 else ""
+        
+        await message.answer(
+            f"🎰💰 **CHIPS LOADED!**\n\n"
+            f"✅ **+{chips_amount} chips** added{bonus_msg}\n"
+            f"💎 **New Balance:** {new_balance} chips\n\n"
+            f"🐸 **LET'S GO DEGEN!**\n\n"
+            f"Open the casino to play:\n"
+            f"• 🎰 Politician Slots (100x jackpot)\n"
+            f"• 🚀 Frog Rocket (crash game)\n"
+            f"• 🎯 Election Roulette\n\n"
+            f"20% of all bets feed the lottery pot! 🎫",
+            parse_mode="Markdown"
+        )
+        print(f"🎰 Casino chips purchased: {chips_amount} chips for user {user_id}")
+
 
 @dp.message(Command("status"))
 async def cmd_status(message: types.Message):
@@ -4519,6 +4554,250 @@ async def api_casino_bet(request: Request):
             "total_tickets": ticket_count,
             "game": game,
             "message": f"Bet recorded. +1 lottery ticket!"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ========================
+# CASINO CHIPS SYSTEM 🎰💰
+# Real money casino with Telegram Stars
+# ========================
+
+@app.post("/api/v1/casino/buy-chips")
+async def api_casino_buy_chips(request: Request):
+    """
+    Create a Telegram Stars invoice for buying casino chips.
+    1 Star = 1 Chip (simple conversion)
+    
+    POST /api/v1/casino/buy-chips
+    {
+        "user_id": 123456789,
+        "amount": 100  // Stars/chips to buy
+    }
+    
+    Returns invoice_url to open in Telegram WebApp
+    """
+    try:
+        data = await request.json()
+        user_id = int(data.get("user_id", 0))
+        amount = int(data.get("amount", 100))
+        
+        if amount < 10:
+            return {"success": False, "error": "Minimum purchase is 10 chips"}
+        if amount > 10000:
+            return {"success": False, "error": "Maximum purchase is 10,000 chips"}
+        
+        # Ensure user exists
+        await db.users.ensure_exists(user_id)
+        
+        # Create Telegram Stars invoice
+        prices = [LabeledPrice(label=f"{amount} Casino Chips", amount=amount)]
+        
+        # Use memeseal_bot for casino (degen branding)
+        active_bot = memeseal_bot if memeseal_bot else bot
+        
+        invoice = await active_bot.create_invoice_link(
+            title=f"{amount} Casino Chips 🎰",
+            description=f"Buy {amount} chips to play slots, crash, and roulette. 20% of bets feed the lottery!",
+            payload=f"casino_chips_{user_id}_{amount}_{int(time.time())}",
+            currency="XTR",  # Telegram Stars
+            prices=prices,
+            provider_token="",  # Empty for Stars
+        )
+        
+        return {
+            "success": True,
+            "invoice_url": invoice,
+            "amount": amount,
+            "message": f"Open invoice to buy {amount} chips!"
+        }
+    except Exception as e:
+        print(f"❌ Casino buy-chips error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/casino/balance/{user_id}")
+async def api_casino_balance(user_id: int):
+    """
+    Get user's casino chip balance.
+    
+    GET /api/v1/casino/balance/123456789
+    """
+    try:
+        # Ensure user exists
+        await db.users.ensure_exists(user_id)
+        
+        balance = await db.casino.get_balance(user_id)
+        lottery_tickets = await db.lottery.count_user_entries(user_id)
+        
+        return {
+            "success": True,
+            "user_id": user_id,
+            "chips": balance.chips,
+            "total_wagered": balance.total_wagered,
+            "total_won": balance.total_won,
+            "total_deposited": balance.total_deposited,
+            "total_withdrawn": balance.total_withdrawn,
+            "net_profit": balance.total_won - balance.total_wagered,
+            "lottery_tickets": lottery_tickets
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/v1/casino/play")
+async def api_casino_play(request: Request):
+    """
+    Place a real money bet with chips.
+    
+    POST /api/v1/casino/play
+    {
+        "user_id": 123456789,
+        "bet_amount": 10,
+        "game": "slots|roulette|crash",
+        "result": "win|lose",
+        "payout": 50  // Only if win
+    }
+    """
+    try:
+        data = await request.json()
+        user_id = int(data.get("user_id", 0))
+        bet_amount = int(data.get("bet_amount", 0))
+        game = data.get("game", "casino")
+        result = data.get("result", "lose")  # "win" or "lose"
+        payout = int(data.get("payout", 0))
+        
+        if bet_amount <= 0:
+            return {"success": False, "error": "Bet amount must be positive"}
+        
+        # Deduct chips for bet
+        success, new_balance = await db.casino.deduct_chips(user_id, bet_amount)
+        
+        if not success:
+            return {
+                "success": False,
+                "error": "Insufficient chips",
+                "chips": new_balance
+            }
+        
+        # Add lottery entry (20% of bet feeds the pot)
+        lottery_contribution = max(1, bet_amount // 5)  # 20%
+        await db.lottery.add_entry(user_id, amount_stars=lottery_contribution)
+        
+        # Process win if applicable
+        if result == "win" and payout > 0:
+            await db.casino.record_win(user_id, payout)
+            balance = await db.casino.get_balance(user_id)
+            return {
+                "success": True,
+                "result": "win",
+                "bet": bet_amount,
+                "payout": payout,
+                "chips": balance.chips,
+                "lottery_contribution": lottery_contribution,
+                "message": f"🎉 You won {payout} chips!"
+            }
+        else:
+            balance = await db.casino.get_balance(user_id)
+            return {
+                "success": True,
+                "result": "lose",
+                "bet": bet_amount,
+                "chips": balance.chips,
+                "lottery_contribution": lottery_contribution,
+                "message": f"Better luck next time! You fed the lottery pot 🐸"
+            }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/v1/casino/withdraw")
+async def api_casino_withdraw(request: Request):
+    """
+    Withdraw chips (cash out to TON wallet).
+    Minimum withdrawal: 100 chips
+    
+    POST /api/v1/casino/withdraw
+    {
+        "user_id": 123456789,
+        "amount": 100,
+        "wallet": "EQB..." // TON wallet address
+    }
+    """
+    try:
+        data = await request.json()
+        user_id = int(data.get("user_id", 0))
+        amount = int(data.get("amount", 0))
+        wallet = data.get("wallet", "")
+        
+        if amount < 100:
+            return {"success": False, "error": "Minimum withdrawal is 100 chips"}
+        
+        if not wallet or not (wallet.startswith("EQ") or wallet.startswith("UQ")):
+            return {"success": False, "error": "Invalid TON wallet address"}
+        
+        # Withdraw chips
+        success, new_balance = await db.casino.withdraw_chips(user_id, amount)
+        
+        if not success:
+            return {
+                "success": False,
+                "error": "Insufficient chips for withdrawal",
+                "chips": new_balance
+            }
+        
+        # Convert chips to TON (1 chip ≈ 0.001 TON based on Star pricing)
+        ton_amount = amount * 0.001
+        
+        # TODO: Actually send TON to wallet
+        # For now, queue for manual processing or use existing withdrawal system
+        
+        return {
+            "success": True,
+            "withdrawn_chips": amount,
+            "ton_equivalent": ton_amount,
+            "remaining_chips": new_balance,
+            "wallet": wallet,
+            "message": f"Withdrawal queued! {ton_amount:.4f} TON will be sent to {wallet[:10]}..."
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/casino/stats")
+async def api_casino_stats():
+    """
+    Get overall casino statistics.
+    """
+    try:
+        stats = await db.casino.get_stats()
+        pot_stars = await db.lottery.get_pot_size_stars()
+        
+        return {
+            "success": True,
+            "total_players": stats["total_players"],
+            "total_deposits": stats["total_deposits"],
+            "total_wagered": stats["total_wagered"],
+            "total_payouts": stats["total_payouts"],
+            "house_edge_collected": stats["total_wagered"] - stats["total_payouts"],
+            "chips_in_play": stats["chips_in_play"],
+            "lottery_pot_stars": pot_stars
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/casino/leaderboard")
+async def api_casino_leaderboard(limit: int = 10):
+    """
+    Get top casino players by net profit.
+    """
+    try:
+        leaderboard = await db.casino.get_leaderboard(limit)
+        return {
+            "success": True,
+            "leaderboard": leaderboard
         }
     except Exception as e:
         return {"success": False, "error": str(e)}

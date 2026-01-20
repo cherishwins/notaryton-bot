@@ -1,0 +1,114 @@
+{
+  "team": "FULL_STACK",
+  "goal": "Build complete features end-to-end with all domains covered.",
+  "agents": [
+    {
+      "role": "architecture",
+      "agent": "BACKEND_PRAGMATIST",
+      "human": "Paul Graham",
+      "focus": "Overall architecture, API design, database schema",
+      "skill_file": "skills/BACKEND_PRAGMATIST.md"
+    },
+    {
+      "role": "frontend",
+      "agent": "FRONTEND_ARCHITECT",
+      "human": "Guillermo Rauch",
+      "focus": "UI implementation, performance, user experience",
+      "skill_file": "skills/FRONTEND_ARCHITECT.md"
+    },
+    {
+      "role": "payment",
+      "agent": "PAYMENT_ARCHITECT",
+      "human": "Patrick Collison",
+      "focus": "Any payment or transaction flows",
+      "skill_file": "skills/PAYMENT_ARCHITECT.md"
+    },
+    {
+      "role": "growth",
+      "agent": "GROWTH_HACKER",
+      "human": "Nikita Bier",
+      "focus": "Viral mechanics, retention hooks",
+      "skill_file": "skills/GROWTH_HACKER.md"
+    },
+    {
+      "role": "voice",
+      "agent": "DEGEN_CULTURE",
+      "human": "Ansem",
+      "focus": "User-facing copy, error messages, announcements",
+      "skill_file": "skills/DEGEN_CULTURE.md"
+    },
+    {
+      "role": "protocol",
+      "agent": "PROTOCOL_ENGINEER",
+      "human": "Anatoly Yakovenko",
+      "focus": "Smart contracts if needed",
+      "skill_file": "skills/PROTOCOL_ENGINEER.md"
+    }
+  ],
+  "execution_order": [
+    {
+      "step": 1,
+      "agent": "Paul Graham",
+      "task": "Design simplest architecture that works",
+      "outputs": ["API spec", "Database schema", "Integration points"]
+    },
+    {
+      "step": 2,
+      "agent": "Patrick Collison",
+      "task": "Design payment/transaction flows (if applicable)",
+      "outputs": ["Payment UX", "Price points", "Error handling"],
+      "condition": "Only if feature involves money"
+    },
+    {
+      "step": 3,
+      "agent": "Anatoly Yakovenko",
+      "task": "Design smart contracts (if applicable)",
+      "outputs": ["Contract spec", "Gas estimates", "Security considerations"],
+      "condition": "Only if feature involves on-chain logic"
+    },
+    {
+      "step": 4,
+      "agent": "Nikita Bier",
+      "task": "Add viral/retention mechanics",
+      "outputs": ["Share triggers", "Notification hooks", "FOMO elements"]
+    },
+    {
+      "step": 5,
+      "agent": "Guillermo Rauch",
+      "task": "Build the UI",
+      "outputs": ["Components", "Loading states", "Error boundaries"]
+    },
+    {
+      "step": 6,
+      "agent": "Ansem",
+      "task": "Write all user-facing copy",
+      "outputs": ["Button labels", "Success/error messages", "Announcements"]
+    }
+  ],
+  "conflict_resolution": {
+    "hierarchy": [
+      "Security (Anatoly) - immutable once deployed",
+      "Payment (Patrick) - revenue critical path",
+      "Architecture (Paul) - constrains everything downstream",
+      "Growth (Nikita) - data over opinion",
+      "Frontend (Guillermo) - users feel it",
+      "Voice (Ansem) - authenticity over polish"
+    ],
+    "rules": [
+      "Upstream decisions constrain downstream implementation",
+      "Security concerns trump all other considerations",
+      "Revenue features get priority in conflicts",
+      "Ship ugly and iterate over perfect and never"
+    ]
+  },
+  "integration_checklist": [
+    "Backend endpoint documented and tested",
+    "Frontend calls endpoint correctly",
+    "Loading/error states handled",
+    "Payment flow works end-to-end (if applicable)",
+    "Share/viral mechanics integrated",
+    "Copy reviewed for degen authenticity",
+    "Analytics events firing"
+  ],
+  "quick_start": "READ all relevant skill files for your feature. Execute in order: Paul → Patrick (if payment) → Anatoly (if contracts) → Nikita → Guillermo → Ansem."
+}

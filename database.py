@@ -101,6 +101,19 @@ class LotteryEntry:
 
 
 @dataclass
+class CasinoBalance:
+    """Casino chips balance for a user."""
+    user_id: int
+    chips: int = 0
+    total_wagered: int = 0
+    total_won: int = 0
+    total_deposited: int = 0
+    total_withdrawn: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+@dataclass
 class TrackedToken:
     """Token tracked for rug detection and scoring."""
     address: str
@@ -609,6 +622,135 @@ class LotteryRepository:
             return None
 
 
+class CasinoRepository:
+    """Repository for casino chip operations - THE MONEY MAKER 💰🎰"""
+
+    def __init__(self, pool: Pool):
+        self._pool = pool
+
+    async def get_balance(self, user_id: int) -> CasinoBalance:
+        """Get user's casino balance, creating if not exists."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM casino_balances WHERE user_id = $1",
+                user_id
+            )
+            if row:
+                return CasinoBalance(**dict(row))
+            
+            # Create new balance
+            await conn.execute("""
+                INSERT INTO casino_balances (user_id, chips)
+                VALUES ($1, 0)
+                ON CONFLICT (user_id) DO NOTHING
+            """, user_id)
+            return CasinoBalance(user_id=user_id, chips=0)
+
+    async def add_chips(self, user_id: int, amount: int) -> int:
+        """Add chips to user's balance. Returns new balance."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO casino_balances (user_id, chips, total_deposited)
+                VALUES ($1, $2, $2)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    chips = casino_balances.chips + $2,
+                    total_deposited = casino_balances.total_deposited + $2,
+                    updated_at = NOW()
+                RETURNING chips
+            """, user_id, amount)
+            return row['chips'] if row else amount
+
+    async def deduct_chips(self, user_id: int, amount: int) -> tuple[bool, int]:
+        """Deduct chips from user's balance. Returns (success, new_balance)."""
+        async with self._pool.acquire() as conn:
+            # Check current balance first
+            current = await conn.fetchval(
+                "SELECT chips FROM casino_balances WHERE user_id = $1",
+                user_id
+            )
+            if current is None or current < amount:
+                return (False, current or 0)
+            
+            row = await conn.fetchrow("""
+                UPDATE casino_balances
+                SET chips = chips - $2,
+                    total_wagered = total_wagered + $2,
+                    updated_at = NOW()
+                WHERE user_id = $1 AND chips >= $2
+                RETURNING chips
+            """, user_id, amount)
+            
+            if row:
+                return (True, row['chips'])
+            return (False, current)
+
+    async def record_win(self, user_id: int, amount: int) -> int:
+        """Record a casino win. Returns new balance."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                UPDATE casino_balances
+                SET chips = chips + $2,
+                    total_won = total_won + $2,
+                    updated_at = NOW()
+                WHERE user_id = $1
+                RETURNING chips
+            """, user_id, amount)
+            return row['chips'] if row else 0
+
+    async def withdraw_chips(self, user_id: int, amount: int) -> tuple[bool, int]:
+        """Withdraw chips (for cashing out). Returns (success, new_balance)."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                UPDATE casino_balances
+                SET chips = chips - $2,
+                    total_withdrawn = total_withdrawn + $2,
+                    updated_at = NOW()
+                WHERE user_id = $1 AND chips >= $2
+                RETURNING chips
+            """, user_id, amount)
+            
+            if row:
+                return (True, row['chips'])
+            return (False, 0)
+
+    async def get_stats(self) -> Dict[str, Any]:
+        """Get overall casino statistics."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT
+                    COUNT(*) as total_players,
+                    COALESCE(SUM(total_deposited), 0) as total_deposits,
+                    COALESCE(SUM(total_wagered), 0) as total_wagered,
+                    COALESCE(SUM(total_won), 0) as total_payouts,
+                    COALESCE(SUM(total_withdrawn), 0) as total_withdrawn,
+                    COALESCE(SUM(chips), 0) as chips_in_play
+                FROM casino_balances
+            """)
+            if row:
+                return dict(row)
+            return {
+                "total_players": 0,
+                "total_deposits": 0,
+                "total_wagered": 0,
+                "total_payouts": 0,
+                "total_withdrawn": 0,
+                "chips_in_play": 0
+            }
+
+    async def get_leaderboard(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get top players by winnings."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT user_id, chips, total_wagered, total_won,
+                       (total_won - total_wagered) as net_profit
+                FROM casino_balances
+                WHERE total_wagered > 0
+                ORDER BY net_profit DESC
+                LIMIT $1
+            """, limit)
+            return [dict(row) for row in rows]
+
+
 class ApiKeyRepository:
     """Repository for API key operations"""
 
@@ -1016,6 +1158,7 @@ class Database:
         self._lottery: Optional[LotteryRepository] = None
         self._tokens: Optional[TokenRepository] = None
         self._wallets: Optional[WalletRepository] = None
+        self._casino: Optional[CasinoRepository] = None
 
     @property
     def pool(self) -> Pool:
@@ -1065,6 +1208,12 @@ class Database:
             raise RuntimeError("Database not connected. Call await db.connect() first.")
         return self._wallets
 
+    @property
+    def casino(self) -> CasinoRepository:
+        if self._casino is None:
+            raise RuntimeError("Database not connected. Call await db.connect() first.")
+        return self._casino
+
     async def connect(self, database_url: Optional[str] = None) -> None:
         """
         Connect to the database and initialize connection pool.
@@ -1102,6 +1251,7 @@ class Database:
         self._lottery = LotteryRepository(self._pool)
         self._tokens = TokenRepository(self._pool)
         self._wallets = WalletRepository(self._pool)
+        self._casino = CasinoRepository(self._pool)
 
         # Initialize schema
         await self._init_schema()
@@ -1120,6 +1270,7 @@ class Database:
             self._lottery = None
             self._tokens = None
             self._wallets = None
+            self._casino = None
             print("Database disconnected")
 
     async def _init_schema(self) -> None:
@@ -1193,6 +1344,20 @@ class Database:
                     created_at TIMESTAMP DEFAULT NOW(),
                     draw_id INTEGER,
                     won BOOLEAN DEFAULT FALSE
+                )
+            """)
+
+            # Casino balances table - THE MONEY MAKER 💰
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS casino_balances (
+                    user_id BIGINT PRIMARY KEY REFERENCES users(user_id),
+                    chips INTEGER DEFAULT 0,
+                    total_wagered INTEGER DEFAULT 0,
+                    total_won INTEGER DEFAULT 0,
+                    total_deposited INTEGER DEFAULT 0,
+                    total_withdrawn INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
                 )
             """)
 
