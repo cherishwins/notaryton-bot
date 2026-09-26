@@ -1233,14 +1233,19 @@ class Database:
                 "Example: postgresql://user:pass@host/dbname"
             )
 
-        # Create connection pool
-        # Render PostgreSQL requires SSL
+        # Create connection pool.
+        # SSL is required by managed Postgres (Neon/Render) but not by a
+        # plain local Postgres. Gate it on DATABASE_SSL so the same image
+        # runs against both. Default 'require' preserves prior behaviour;
+        # set DATABASE_SSL=disable for a local/compose Postgres.
+        ssl_mode = os.getenv("DATABASE_SSL", "require").strip().lower()
+        ssl_arg = False if ssl_mode in ("disable", "false", "off", "0", "no", "none") else "require"
         self._pool = await asyncpg.create_pool(
             url,
             min_size=2,
             max_size=10,
             command_timeout=30,
-            ssl='require'
+            ssl=ssl_arg
         )
 
         # Initialize repositories

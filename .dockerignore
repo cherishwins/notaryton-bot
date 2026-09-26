@@ -1,0 +1,63 @@
+# ---- VCS / CI ----
+.git
+.gitignore
+.github
+
+# ---- Python caches / local envs ----
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# ---- Secrets / env (RUNTIME only, never baked into an image layer) ----
+.env
+.env.*
+.env.template
+
+# ---- Runtime-generated / local data (never bake in) ----
+downloads/
+data/
+backups/
+*.sqlite
+*.sqlite3
+*.db
+
+# ---- Node (only sealbet/memescan-app use it; not part of the bot image) ----
+node_modules/
+**/node_modules/
+
+# ---- Docker / deploy artifacts ----
+Dockerfile
+.dockerignore
+docker-compose*.yml
+render.yaml
+
+# ---- Tests (not needed at runtime) ----
+tests/
+e2e/
+
+# ---- Root-level markdown & planning docs (not needed at runtime) ----
+/*.md
+docs/
+master-plan/
+
+# ---- Heavy non-runtime dirs (design / planning / asset sources) ----
+meme_branding/
+memescan-app/
+sealbet/
+agents/
+memescan/brandimgs/
+memescan/branding/
+
+# ---- Stray / oversized repo cruft ----
+Telegram-Ads-*.png
+*-screenshot-*.png
+=*
