@@ -1,0 +1,110 @@
+# =============================================================================
+# NotaryTON / MemeSeal — single-box production stack
+#
+#   db   : PostgreSQL 16 (bundled; the data lives in a named volume on the host)
+#   bot  : the aiogram + FastAPI webhook server, built from ./Dockerfile
+#
+# One shared Docker host, one Caddy reverse proxy out front. Caddy terminates
+# TLS for the public domain and proxies to the bot on 127.0.0.1:${BOT_PORT}
+# (or attach both to a shared external network — see the note under `bot`).
+#
+# Bring up:
+#   cp .env.template .env    # then fill in the real tokens/keys (never committed)
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# All secrets are RUNTIME env, supplied via .env — nothing is baked into an image.
+# =============================================================================
+
+services:
+  db:
+    # Digest-pinned: `16-alpine` is a moving tag; the digest freezes exactly
+    # which image runs so `up -d --build` cannot silently pull a different or
+    # compromised base. Update deliberately with
+    # `docker buildx imagetools inspect postgres:16-alpine`.
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-notaryton}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-notaryton}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    # Hardening for a shared single-box host. The official postgres entrypoint
+    # starts as root to chown its data dir and step down to the postgres user,
+    # so ALL is dropped and only that minimal set is added back (verified: the
+    # container fails to start with a bare cap_drop: [ALL]).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    mem_limit: 1g
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-notaryton} -d ${POSTGRES_DB:-notaryton}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # No published port: only the bot (same compose network) reaches the DB.
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Hardening for the internet-facing service on a shared box. It runs as the
+    # non-root appuser (uid 10001) from the Dockerfile and needs no Linux
+    # capabilities (binds high port 8000). The root filesystem is read-only so a
+    # compromise cannot rewrite code on disk; the only two runtime-writable paths
+    # are backed by tmpfs (downloads/ for temp file fetches — verified writable
+    # by the non-root user under a read-only root — and /tmp for spooled
+    # multipart uploads). Resource caps keep one app from starving its neighbours.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/downloads
+    mem_limit: 512m
+    pids_limit: 256
+    # Everything sensitive comes from .env at runtime (BOT_TOKEN, MEMESEAL_BOT_TOKEN,
+    # MEMESCAN_BOT_TOKEN, TON_WALLET_SECRET, SERVICE_TON_WALLET, TON_CENTER_API_KEY,
+    # TONAPI_KEY, TONAPI_WEBHOOK_SECRET, TWITTER_*, TONID_CLIENT_ID, CHANNEL_ID,
+    # GROUP_IDS, SEAL_* addresses, WEBHOOK_URL, ... — mirror render.yaml).
+    env_file:
+      - .env
+    environment:
+      # Talk to the bundled Postgres over the compose network. This overrides any
+      # DATABASE_URL in .env so the bundled DB is used by default; point it at a
+      # managed Postgres (Neon) instead by removing this line and setting
+      # DATABASE_URL + DATABASE_SSL=require in .env.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-notaryton}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-notaryton}
+      # Local Postgres has no TLS; disable the asyncpg ssl='require' default.
+      DATABASE_SSL: ${DATABASE_SSL:-disable}
+      PORT: "8000"
+      # Public HTTPS origin Caddy serves — Telegram webhooks are registered here
+      # on startup. MUST be set in .env for the bot to receive updates.
+      WEBHOOK_URL: ${WEBHOOK_URL:?set WEBHOOK_URL to your public https origin in .env}
+    ports:
+      # Published on loopback only; the host's Caddy proxies to it.
+      - "127.0.0.1:${BOT_PORT:-8000}:8000"
+    # Alternative to publishing on loopback: put the bot on the same external
+    # network as Caddy and let Caddy reach it by service name, e.g.
+    #   networks: [web]
+    # networks:
+    #   web:
+    #     external: true
+
+volumes:
+  db_data:
