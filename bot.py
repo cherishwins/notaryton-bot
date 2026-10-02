@@ -7,7 +7,7 @@ import asyncio
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types, F
@@ -41,14 +41,22 @@ TON_CENTER_API_KEY = os.getenv("TON_CENTER_API_KEY")
 TON_WALLET_SECRET = os.getenv("TON_WALLET_SECRET")
 SERVICE_TON_WALLET = os.getenv("SERVICE_TON_WALLET")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://notaryton.com")
-WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
-MEMESEAL_WEBHOOK_PATH = f"/webhook/{MEMESEAL_BOT_TOKEN}" if MEMESEAL_BOT_TOKEN else None
-MEMESCAN_WEBHOOK_PATH = f"/webhook/{MEMESCAN_BOT_TOKEN}" if MEMESCAN_BOT_TOKEN else None
+# Telegram webhook paths are fixed and not secret. The bot token used to be the
+# path, which wrote it into every access and error log. Telegram instead echoes
+# TELEGRAM_WEBHOOK_SECRET back in X-Telegram-Bot-Api-Secret-Token on each update.
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+WEBHOOK_PATH = "/webhook/telegram"
+MEMESEAL_WEBHOOK_PATH = "/webhook/memeseal" if MEMESEAL_BOT_TOKEN else None
+MEMESCAN_WEBHOOK_PATH = "/webhook/memescan" if MEMESCAN_BOT_TOKEN else None
 GROUP_IDS = os.getenv("GROUP_IDS", "").split(",")  # Comma-separated chat IDs
 
 # TonAPI for real-time webhooks (replaces 30s polling!)
 TONAPI_KEY = os.getenv("TONAPI_KEY", "")
 TONAPI_WEBHOOK_SECRET = os.getenv("TONAPI_WEBHOOK_SECRET", "")
+
+# Admin endpoints are disabled unless ADMIN_SECRET is set. It is sent in the
+# X-Admin-Secret header, never the query string (which lands in access logs).
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
 
 # Known deploy bots (add more as needed)
 DEPLOY_BOTS = ["@tondeployer", "@memelaunchbot", "@toncoinbot"]
@@ -2787,9 +2795,25 @@ if memeseal_dp:
 # FASTAPI ENDPOINTS
 # ========================
 
+def telegram_secret_ok(request: Request) -> bool:
+    """True only if the update carries the secret_token we registered with Telegram."""
+    if not TELEGRAM_WEBHOOK_SECRET:
+        return False
+    given = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    return hmac.compare_digest(given.encode(), TELEGRAM_WEBHOOK_SECRET.encode())
+
+def admin_ok(request: Request) -> bool:
+    """True only if ADMIN_SECRET is set and the X-Admin-Secret header matches it."""
+    if not ADMIN_SECRET:
+        return False
+    given = request.headers.get("X-Admin-Secret", "")
+    return hmac.compare_digest(given.encode(), ADMIN_SECRET.encode())
+
 @app.post(WEBHOOK_PATH)
 async def webhook_handler(request: Request):
     """Handle incoming webhook updates from Telegram (NotaryTON)"""
+    if not telegram_secret_ok(request):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
     update = Update(**(await request.json()))
     await dp.feed_update(bot, update)
     return {"ok": True}
@@ -2799,6 +2823,8 @@ if MEMESEAL_WEBHOOK_PATH:
     @app.post(MEMESEAL_WEBHOOK_PATH)
     async def memeseal_webhook_handler(request: Request):
         """Handle incoming webhook updates from Telegram (MemeSeal)"""
+        if not telegram_secret_ok(request):
+            return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
         update = Update(**(await request.json()))
         await memeseal_dp.feed_update(memeseal_bot, update)
         return {"ok": True}
@@ -2808,6 +2834,8 @@ if MEMESCAN_WEBHOOK_PATH:
     @app.post(MEMESCAN_WEBHOOK_PATH)
     async def memescan_webhook_handler(request: Request):
         """Handle incoming webhook updates from Telegram (MemeScan)"""
+        if not telegram_secret_ok(request):
+            return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
         update = Update(**(await request.json()))
         await memescan_dp.feed_update(memescan_bot, update)
         return {"ok": True}
@@ -2825,21 +2853,21 @@ async def tonapi_webhook(request: Request):
     This replaces the 30-second polling with instant detection!
     """
     try:
-        # Verify webhook signature if secret is configured
-        if TONAPI_WEBHOOK_SECRET:
-            body = await request.body()
-            signature = request.headers.get("X-TonAPI-Signature", "")
-            expected = hmac.new(
-                TONAPI_WEBHOOK_SECRET.encode(),
-                body,
-                hashlib.sha256
-            ).hexdigest()
-            if not hmac.compare_digest(signature, expected):
-                print(f"⚠️ TonAPI webhook: Invalid signature")
-                return {"ok": False, "error": "Invalid signature"}
-            data = json.loads(body)
-        else:
-            data = await request.json()
+        # Fail closed: without a secret anyone could POST a forged payment.
+        if not TONAPI_WEBHOOK_SECRET:
+            print("⚠️ TonAPI webhook rejected: TONAPI_WEBHOOK_SECRET is not set")
+            return JSONResponse({"ok": False, "error": "Webhook not configured"}, status_code=503)
+        body = await request.body()
+        signature = request.headers.get("X-TonAPI-Signature", "")
+        expected = hmac.new(
+            TONAPI_WEBHOOK_SECRET.encode(),
+            body,
+            hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            print(f"⚠️ TonAPI webhook: Invalid signature")
+            return JSONResponse({"ok": False, "error": "Invalid signature"}, status_code=401)
+        data = json.loads(body)
 
         print(f"📡 TonAPI webhook received: {data.get('event_type', 'unknown')}")
 
@@ -3044,19 +3072,20 @@ async def casino_webhook(request: Request):
     Receives bet placements, wins, losses, liquidity events.
     """
     try:
+        # Fail closed: without a secret anyone could POST forged contract events.
+        if not TONCONSOLE_CASINO_SECRET:
+            print("⚠️ Casino webhook rejected: TONCONSOLE_CASINO_SECRET is not set")
+            return JSONResponse({"ok": False, "error": "Webhook not configured"}, status_code=503)
         body = await request.body()
-
-        # Verify webhook signature if secret is configured
-        if TONCONSOLE_CASINO_SECRET:
-            signature = request.headers.get("X-Signature", "")
-            expected = hmac.new(
-                TONCONSOLE_CASINO_SECRET.encode(),
-                body,
-                hashlib.sha256
-            ).hexdigest()
-            if not hmac.compare_digest(signature, expected):
-                print(f"⚠️ Casino webhook: Invalid signature")
-                return {"ok": False, "error": "Invalid signature"}
+        signature = request.headers.get("X-Signature", "")
+        expected = hmac.new(
+            TONCONSOLE_CASINO_SECRET.encode(),
+            body,
+            hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            print(f"⚠️ Casino webhook: Invalid signature")
+            return JSONResponse({"ok": False, "error": "Invalid signature"}, status_code=401)
 
         data = json.loads(body)
         print(f"🎰 Casino webhook: {json.dumps(data, indent=2)[:500]}")
@@ -3091,19 +3120,20 @@ async def tokens_webhook(request: Request):
     Receives token creations, buys, sells, graduations.
     """
     try:
+        # Fail closed: without a secret anyone could POST forged contract events.
+        if not TONCONSOLE_TOKENS_SECRET:
+            print("⚠️ Tokens webhook rejected: TONCONSOLE_TOKENS_SECRET is not set")
+            return JSONResponse({"ok": False, "error": "Webhook not configured"}, status_code=503)
         body = await request.body()
-
-        # Verify webhook signature if secret is configured
-        if TONCONSOLE_TOKENS_SECRET:
-            signature = request.headers.get("X-Signature", "")
-            expected = hmac.new(
-                TONCONSOLE_TOKENS_SECRET.encode(),
-                body,
-                hashlib.sha256
-            ).hexdigest()
-            if not hmac.compare_digest(signature, expected):
-                print(f"⚠️ Tokens webhook: Invalid signature")
-                return {"ok": False, "error": "Invalid signature"}
+        signature = request.headers.get("X-Signature", "")
+        expected = hmac.new(
+            TONCONSOLE_TOKENS_SECRET.encode(),
+            body,
+            hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            print(f"⚠️ Tokens webhook: Invalid signature")
+            return JSONResponse({"ok": False, "error": "Invalid signature"}, status_code=401)
 
         data = json.loads(body)
         print(f"🪙 Tokens webhook: {json.dumps(data, indent=2)[:500]}")
@@ -3145,13 +3175,13 @@ async def terms_of_service():
 @app.get("/memescan", response_class=HTMLResponse)
 async def memescan_landing(request: Request):
     """MemeScan - TON Meme Terminal Landing Page"""
-    return templates.TemplateResponse("memescan/landing.html", {"request": request})
+    return templates.TemplateResponse(request, "memescan/landing.html")
 
 
 @app.get("/memescan/litepaper", response_class=HTMLResponse)
 async def memescan_litepaper(request: Request):
     """MemeScan Litepaper - readable whitepaper"""
-    return templates.TemplateResponse("memescan/litepaper.html", {"request": request})
+    return templates.TemplateResponse(request, "memescan/litepaper.html")
 
 
 # ========================
@@ -3962,8 +3992,10 @@ async def api_kol_by_wallet(wallet_address: str):
 
 
 @app.post("/api/v1/kols/seed")
-async def api_kol_seed():
+async def api_kol_seed(request: Request):
     """Seed database with Grok KOL intel (admin only)."""
+    if not admin_ok(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     try:
         repo = await get_kol_repo()
         count = await repo.seed_from_grok()
@@ -4277,7 +4309,7 @@ async def favicon():
 @app.get("/verify", response_class=HTMLResponse)
 async def verify_page(request: Request):
     """Public verification page - check any seal"""
-    return templates.TemplateResponse("verify.html", {"request": request, "memeseal_username": MEMESEAL_USERNAME})
+    return templates.TemplateResponse(request, "verify.html", {"memeseal_username": MEMESEAL_USERNAME})
 
 
 @app.get("/memeseal")
@@ -4289,29 +4321,27 @@ async def memeseal_redirect():
 @app.get("/whitepaper", response_class=HTMLResponse)
 async def whitepaper(request: Request):
     """FROGS FOREVER - The Vision"""
-    return templates.TemplateResponse("whitepaper.html", {"request": request})
+    return templates.TemplateResponse(request, "whitepaper.html")
 
 
 @app.get("/", response_class=HTMLResponse)
 async def landing_page_memeseal(request: Request):
     """MemeSeal TON - Main landing page"""
-    return templates.TemplateResponse("landing.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "landing.html", {
         "memeseal_username": MEMESEAL_USERNAME
     })
 
 @app.get("/notaryton", response_class=HTMLResponse)
 async def landing_page_legacy(request: Request):
     """Legacy NotaryTON landing page"""
-    return templates.TemplateResponse("notaryton.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "notaryton.html", {
         "bot_username": BOT_USERNAME
     })
 
 @app.get("/score", response_class=HTMLResponse)
 async def rugscore_page(request: Request):
     """Rug Score landing page - marketing hook for token safety checks"""
-    return templates.TemplateResponse("score.html", {"request": request})
+    return templates.TemplateResponse(request, "score.html")
 
 # ========================
 # PUBLIC API ENDPOINTS (Make NotaryTON essential infrastructure)
@@ -4838,14 +4868,12 @@ async def stats():
     }
 
 
-# Admin endpoint to seed lottery pot (protected by secret)
-ADMIN_SECRET = os.getenv("ADMIN_SECRET", "memeseal-admin-2024")
-
+# Admin endpoint to seed lottery pot (protected by ADMIN_SECRET, see admin_ok)
 @app.post("/admin/seed-lottery")
-async def seed_lottery(amount_stars: int = 2500, secret: str = ""):
+async def seed_lottery(request: Request, amount_stars: int = 2500):
     """Seed the lottery pot with fake entries (admin only)"""
-    if secret != ADMIN_SECRET:
-        return {"error": "Unauthorized"}
+    if not admin_ok(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
     # Add entries to lottery (creates a "house" user if needed)
     house_user_id = 1  # System/house user
@@ -4872,10 +4900,10 @@ async def seed_lottery(amount_stars: int = 2500, secret: str = ""):
 
 
 @app.post("/admin/import-ton-labels")
-async def import_ton_labels(secret: str = ""):
+async def import_ton_labels(request: Request):
     """Import ton-labels data into known_wallets table (one-time migration)"""
-    if secret != ADMIN_SECRET:
-        return {"error": "Unauthorized"}
+    if not admin_ok(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
     import json
     from pathlib import Path
@@ -4970,8 +4998,7 @@ async def dashboard(request: Request):
             ORDER BY timestamp DESC LIMIT 10
         """)
 
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "dashboard.html", {
         "total_users": total_users,
         "total_notarizations": total_notarizations,
         "notarizations_24h": notarizations_24h or 0,
@@ -4981,6 +5008,31 @@ async def dashboard(request: Request):
         "top_referrers": top_referrers,
         "recent_seals": recent_seals
     })
+
+async def register_webhook(tg_bot: Bot, path: str, name: str):
+    """Register a Telegram webhook, retrying with backoff until Telegram accepts it.
+
+    Runs as a background task so an unreachable API, a bad token or a rejected
+    URL never stops the HTTP server: /health and the TonAPI payment webhooks
+    stay up while this keeps trying. drop_pending_updates=False keeps the files
+    users sent while we were down (e.g. during a redeploy).
+    """
+    delay = 5
+    while True:
+        try:
+            await tg_bot.set_webhook(
+                f"{WEBHOOK_URL}{path}",
+                secret_token=TELEGRAM_WEBHOOK_SECRET,
+                drop_pending_updates=False,
+            )
+            print(f"✅ {name} webhook registered")
+            return
+        except Exception as e:
+            # Errors can quote the Bot API URL, which contains the token.
+            reason = str(e).replace(tg_bot.token, "<token>")
+            print(f"⚠️ {name} webhook registration failed, retrying in {delay}s: {type(e).__name__}: {reason}")
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 300)
 
 @app.on_event("startup")
 async def on_startup():
@@ -5009,22 +5061,16 @@ async def on_startup():
         except Exception as e:
             print(f"⚠️ Could not fetch MemeSeal info: {e}")
 
-    # Set NotaryTON webhook
-    webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
-    await bot.set_webhook(webhook_url, drop_pending_updates=True)
-    print(f"✅ NotaryTON webhook set to: {webhook_url}")
-
-    # Set MemeSeal webhook (if configured)
-    if memeseal_bot and MEMESEAL_WEBHOOK_PATH:
-        memeseal_webhook_url = f"{WEBHOOK_URL}{MEMESEAL_WEBHOOK_PATH}"
-        await memeseal_bot.set_webhook(memeseal_webhook_url, drop_pending_updates=True)
-        print(f"✅ MemeSeal webhook set to: {memeseal_webhook_url}")
-
-    # Set MemeScan webhook (if configured)
-    if memescan_bot and MEMESCAN_WEBHOOK_PATH:
-        memescan_webhook_url = f"{WEBHOOK_URL}{MEMESCAN_WEBHOOK_PATH}"
-        await memescan_bot.set_webhook(memescan_webhook_url, drop_pending_updates=True)
-        print(f"✅ MemeScan webhook set to: {memescan_webhook_url}")
+    # Register webhooks in the background (see register_webhook). Without the
+    # secret every update would be rejected, so registering would be pointless.
+    if TELEGRAM_WEBHOOK_SECRET:
+        asyncio.create_task(register_webhook(bot, WEBHOOK_PATH, "NotaryTON"))
+        if memeseal_bot and MEMESEAL_WEBHOOK_PATH:
+            asyncio.create_task(register_webhook(memeseal_bot, MEMESEAL_WEBHOOK_PATH, "MemeSeal"))
+        if memescan_bot and MEMESCAN_WEBHOOK_PATH:
+            asyncio.create_task(register_webhook(memescan_bot, MEMESCAN_WEBHOOK_PATH, "MemeScan"))
+    else:
+        print("⚠️ TELEGRAM_WEBHOOK_SECRET is not set: webhooks not registered, Telegram updates will be rejected")
 
     # Start MemeScan Twitter auto-poster (if enabled)
     if os.getenv("MEMESCAN_TWITTER_ENABLED", "").lower() == "true":
@@ -5041,8 +5087,11 @@ async def on_startup():
             except Exception as e:
                 print(f"❌ Failed to join group {group_id}: {e}")
 
-    # Start payment polling task
-    asyncio.create_task(poll_wallet_for_payments())
+    # Start payment polling task (it has no wallet to watch without SERVICE_TON_WALLET)
+    if SERVICE_TON_WALLET:
+        asyncio.create_task(poll_wallet_for_payments())
+    else:
+        print("⚠️ SERVICE_TON_WALLET is not set: TON payment poller not started")
 
     # 🐸 Start pending payment cleanup task
     asyncio.create_task(cleanup_pending_payments())

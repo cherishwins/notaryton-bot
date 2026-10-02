@@ -6,7 +6,7 @@ A Telegram bot for auto-notarizing TON blockchain memecoin launches. Single-file
 ## Architecture & Key Components
 
 ### Hybrid FastAPI + aiogram Setup
-- FastAPI handles webhook endpoint (`/webhook/{BOT_TOKEN}`) and stats API
+- FastAPI handles webhook endpoint (`/webhook/telegram`, authenticated by `X-Telegram-Bot-Api-Secret-Token`) and stats API
 - aiogram Dispatcher processes Telegram updates fed from webhook
 - No `dp.start_polling()`—only webhook mode via `dp.feed_update(bot, update)`
 - Server runs on port 8000 with uvicorn

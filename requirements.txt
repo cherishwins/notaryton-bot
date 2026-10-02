@@ -1,3 +1,7 @@
+# Direct dependencies. The image and CI install requirements.lock, the fully
+# pinned and hashed set resolved from this file. After changing this file:
+#   pip-compile --generate-hashes --strip-extras --allow-unsafe --no-emit-index-url \
+#     --output-file requirements.lock requirements.txt
 aiogram>=3.15.0
 fastapi>=0.115.0
 jinja2>=3.1.0

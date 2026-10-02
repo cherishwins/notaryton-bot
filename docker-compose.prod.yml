@@ -65,9 +65,11 @@ services:
     # non-root appuser (uid 10001) from the Dockerfile and needs no Linux
     # capabilities (binds high port 8000). The root filesystem is read-only so a
     # compromise cannot rewrite code on disk; the only two runtime-writable paths
-    # are backed by tmpfs (downloads/ for temp file fetches — verified writable
-    # by the non-root user under a read-only root — and /tmp for spooled
-    # multipart uploads). Resource caps keep one app from starving its neighbours.
+    # are backed by tmpfs (downloads/ for temp file fetches, and /tmp for spooled
+    # multipart uploads). A tmpfs mounts root:root 0755 and hides the image's
+    # appuser-owned downloads/, so it is mounted owned by appuser (uid 10001 in
+    # the Dockerfile) or every file/photo seal fails with PermissionError.
+    # Resource caps keep one app from starving its neighbours.
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -75,13 +77,11 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-      - /app/downloads
+      - /app/downloads:uid=10001,gid=10001,mode=0700
     mem_limit: 512m
     pids_limit: 256
-    # Everything sensitive comes from .env at runtime (BOT_TOKEN, MEMESEAL_BOT_TOKEN,
-    # MEMESCAN_BOT_TOKEN, TON_WALLET_SECRET, SERVICE_TON_WALLET, TON_CENTER_API_KEY,
-    # TONAPI_KEY, TONAPI_WEBHOOK_SECRET, TWITTER_*, TONID_CLIENT_ID, CHANNEL_ID,
-    # GROUP_IDS, SEAL_* addresses, WEBHOOK_URL, ... — mirror render.yaml).
+    # Everything sensitive comes from .env at runtime. .env.template lists every
+    # name the bot reads, required ones first.
     env_file:
       - .env
     environment:
