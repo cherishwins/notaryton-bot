@@ -157,7 +157,7 @@ notaryton-bot/
 | `/api/v1/kols/by-category/{cat}` | GET | Filter by category |
 | `/api/v1/kols/by-chain/{chain}` | GET | Filter by chain focus |
 | `/api/v1/kols/filters` | GET | Available filter options |
-| `/api/v1/kols/seed` | POST | Seed database with 82 KOLs |
+| `/api/v1/kols/seed` | POST | Seed database with 82 KOLs (requires `X-Admin-Secret: $ADMIN_SECRET`) |
 
 ### Lottery & Stats
 
