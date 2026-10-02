@@ -5034,18 +5034,16 @@ async def register_webhook(tg_bot: Bot, path: str, name: str):
             await asyncio.sleep(delay)
             delay = min(delay * 2, 300)
 
-@app.on_event("startup")
-async def on_startup():
-    """Set webhooks for both bots on startup"""
+async def announce_bots():
+    """Fetch the bots' usernames and announce in GROUP_IDS.
+
+    A background task for the same reason as register_webhook: when Telegram
+    accepts the connection but never answers, each call waits out aiogram's 60s
+    timeout, and none of that may delay the HTTP server. Until a lookup succeeds
+    the hardcoded usernames stay in place.
+    """
     global BOT_USERNAME, MEMESEAL_USERNAME
 
-    # Initialize database (PostgreSQL via Neon)
-    await db.connect()
-
-    # Initialize social media poster (X + Telegram channel)
-    social_poster.initialize()
-
-    # Get bot info
     try:
         bot_info = await bot.get_me()
         BOT_USERNAME = bot_info.username
@@ -5060,6 +5058,29 @@ async def on_startup():
             print(f"✅ MemeSeal username: @{MEMESEAL_USERNAME}")
         except Exception as e:
             print(f"⚠️ Could not fetch MemeSeal info: {e}")
+
+    # Join groups
+    for group_id in GROUP_IDS:
+        if group_id.strip():
+            try:
+                await bot.send_message(group_id, "🔐 NotaryTON is now monitoring this group for auto-notarization!")
+                print(f"✅ Joined group: {group_id}")
+            except Exception as e:
+                print(f"❌ Failed to join group {group_id}: {e}")
+
+@app.on_event("startup")
+async def on_startup():
+    """Set webhooks for both bots on startup"""
+
+    # Initialize database (PostgreSQL via Neon)
+    await db.connect()
+
+    # Initialize social media poster (X + Telegram channel)
+    social_poster.initialize()
+
+    # Usernames and group announcements also call Telegram, which can hang for
+    # aiogram's 60s timeout per call: do them in the background (see announce_bots).
+    asyncio.create_task(announce_bots())
 
     # Register webhooks in the background (see register_webhook). Without the
     # secret every update would be rejected, so registering would be pointless.
@@ -5077,15 +5098,6 @@ async def on_startup():
         memescan_twitter.initialize()
         asyncio.create_task(memescan_twitter.run_auto_poster(interval_seconds=1800))
         print("✅ MemeScan Twitter auto-poster started (every 30 min)")
-
-    # Join groups
-    for group_id in GROUP_IDS:
-        if group_id.strip():
-            try:
-                await bot.send_message(group_id, "🔐 NotaryTON is now monitoring this group for auto-notarization!")
-                print(f"✅ Joined group: {group_id}")
-            except Exception as e:
-                print(f"❌ Failed to join group {group_id}: {e}")
 
     # Start payment polling task (it has no wallet to watch without SERVICE_TON_WALLET)
     if SERVICE_TON_WALLET:

@@ -6,6 +6,7 @@ Nothing here reaches Telegram, TON or the database: secrets are set on the
 module per test, and the app runs without its startup hook.
 """
 
+import asyncio
 import os
 import types
 
@@ -224,3 +225,61 @@ async def test_startup_does_not_wait_for_telegram_or_poll_without_wallet(monkeyp
     assert "register_webhook" in started
     assert "poll_wallet_for_payments" not in started
     assert "SERVICE_TON_WALLET is not set" in capsys.readouterr().out
+
+
+@pytest.mark.unit
+async def test_startup_completes_while_telegram_hangs(monkeypatch, tmp_path):
+    """A Telegram that accepts and never answers must not hold up startup."""
+    started = []
+
+    def create_task(coro):
+        started.append(coro.__qualname__)
+        coro.close()
+
+    async def noop(*args, **kwargs):
+        return None
+
+    async def hang(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(bot, "asyncio", types.SimpleNamespace(create_task=create_task))
+    monkeypatch.setattr(bot.db, "connect", noop)
+    monkeypatch.setattr(bot.social_poster, "initialize", lambda: None)
+    hung = types.SimpleNamespace(get_me=hang, send_message=hang, set_webhook=hang)
+    monkeypatch.setattr(bot, "bot", hung)
+    monkeypatch.setattr(bot, "memeseal_bot", hung)
+    monkeypatch.setattr(bot, "memescan_bot", None)
+    monkeypatch.setattr(bot, "GROUP_IDS", ["-1001", "-1002"])
+    monkeypatch.setattr(bot, "TELEGRAM_WEBHOOK_SECRET", "s3cret")
+
+    await asyncio.wait_for(bot.on_startup(), timeout=2)
+
+    assert "announce_bots" in started
+    assert "register_webhook" in started
+
+
+@pytest.mark.unit
+async def test_announce_bots_sets_usernames_and_announces(monkeypatch):
+    sent = []
+
+    async def get_me():
+        return types.SimpleNamespace(username="NotaryTest_bot")
+
+    async def get_ms():
+        return types.SimpleNamespace(username="MemeSealTest_bot")
+
+    async def send_message(chat_id, text):
+        sent.append(chat_id)
+
+    monkeypatch.setattr(bot, "BOT_USERNAME", "NotaryTON_bot")
+    monkeypatch.setattr(bot, "MEMESEAL_USERNAME", "MemeSealTON_bot")
+    monkeypatch.setattr(bot, "bot", types.SimpleNamespace(get_me=get_me, send_message=send_message))
+    monkeypatch.setattr(bot, "memeseal_bot", types.SimpleNamespace(get_me=get_ms))
+    monkeypatch.setattr(bot, "GROUP_IDS", ["-1001", " "])
+
+    await bot.announce_bots()
+
+    assert bot.BOT_USERNAME == "NotaryTest_bot"
+    assert bot.MEMESEAL_USERNAME == "MemeSealTest_bot"
+    assert sent == ["-1001"]
