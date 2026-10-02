@@ -27,9 +27,14 @@ RUN python -m venv /opt/venv
 # uvicorn[standard], pytoniq, aiogram, ...), so no C toolchain is required
 # and the builder stays slim. If a future dep ships sdist-only, add
 # build-essential via apt in this stage (it is discarded from runtime).
-COPY requirements.txt ./
+#
+# requirements.lock pins every package, transitive ones included, with hashes,
+# so a rebuild installs exactly what was tested and cannot silently pick up a
+# new framework (an unpinned Starlette 1.x once turned every page into a 500).
+# Regenerate it from requirements.txt as described at the top of that file.
+COPY requirements.lock ./
 RUN pip install --upgrade pip \
- && pip install --only-binary=:all: -r requirements.txt
+ && pip install --only-binary=:all: --require-hashes -r requirements.lock
 
 # ---- Stage 2: slim runtime ---------------------------------------------------
 # Same digest as the builder — one pinned base for both stages.

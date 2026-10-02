@@ -217,7 +217,7 @@ TWITTER_API_KEY=        # Social posting
 
 ### Add a new KOL
 
-Edit `kol_models.py`, add to `GROK_KOL_SEED`, then call `/api/v1/kols/seed`.
+Edit `kol_models.py`, add to `GROK_KOL_SEED`, then `POST /api/v1/kols/seed` with the header `X-Admin-Secret: $ADMIN_SECRET`.
 
 ### Check rug score
 

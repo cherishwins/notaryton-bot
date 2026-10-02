@@ -9,7 +9,8 @@ services:
     name: notaryton-bot
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    # The pinned, hashed set (see requirements.txt for how to regenerate it).
+    buildCommand: pip install --require-hashes -r requirements.lock
     startCommand: python bot.py
     healthCheckPath: /health
     envVars:
@@ -17,6 +18,10 @@ services:
       - key: BOT_TOKEN
         sync: false
       - key: MEMESEAL_BOT_TOKEN
+        sync: false
+      # Required: sent with setWebhook and checked on every update. Unset, the
+      # webhooks are not registered and every Telegram update is rejected.
+      - key: TELEGRAM_WEBHOOK_SECRET
         sync: false
 
       # TON Blockchain (set in dashboard)
@@ -29,6 +34,13 @@ services:
 
       # TonAPI for webhooks (set in dashboard)
       - key: TONAPI_KEY
+        sync: false
+      # Optional. Unset, /webhook/tonapi rejects everything (see .env.template).
+      - key: TONAPI_WEBHOOK_SECRET
+        sync: false
+
+      # Optional. Unset, /admin/* and POST /api/v1/kols/seed are disabled.
+      - key: ADMIN_SECRET
         sync: false
 
       # Database (auto-linked from Render PostgreSQL)

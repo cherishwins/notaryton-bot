@@ -419,7 +419,7 @@ async def cmd_newcmd(message: types.Message):
 
 1. Edit `kol_models.py`
 2. Add to `GROK_KOL_SEED` list
-3. Call `/api/v1/kols/seed` endpoint
+3. Call `POST /api/v1/kols/seed` with the header `X-Admin-Secret: $ADMIN_SECRET` (disabled while `ADMIN_SECRET` is unset)
 
 ### Checking Logs
 

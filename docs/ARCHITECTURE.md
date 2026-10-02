@@ -23,7 +23,7 @@
 │  │                         (bot.py)                                   │  │
 │  │                                                                    │  │
 │  │  Endpoints:                                                        │  │
-│  │  - /webhook/{token}    Telegram webhooks                          │  │
+│  │  - /webhook/telegram   Telegram webhooks (secret_token header)     │  │
 │  │  - /api/v1/tokens/*    Token data APIs                            │  │
 │  │  - /score/{address}    Rug score lookup                           │  │
 │  │  - /feed               Live SSE dashboard                         │  │
