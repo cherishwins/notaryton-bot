@@ -118,9 +118,21 @@ notaryton-bot/
 
 ## Recent Changes (Dec 2025)
 
-- Lottery draw runs Sundays at midnight UTC with auto-payout
-- TonAPI webhook signature verification (HMAC)
-- Auto-seal triggers when webhook detects payment
+- Lottery draw runs Sundays at midnight UTC; the prize is held in `lottery_prizes`
+  (never in the /withdraw balance). TON auto-payout, /withdraw sends and the casino
+  API are each off unless LOTTERY_AUTO_PAYOUT_ENABLED / WITHDRAWALS_ENABLED /
+  CASINO_ENABLED is `true` (they move value at a user's request: legal opinion first)
+- Legacy lottery entries are voided only by the operator, once, via
+  `POST /admin/void-legacy-lottery` (never at startup), which also takes back
+  casino chips minted by forged wins; no Sunday draw runs until it has. Call it
+  right after deploying, then audit referral_earnings and casino chips before
+  turning on LOTTERY_AUTO_PAYOUT_ENABLED, WITHDRAWALS_ENABLED or CASINO_ENABLED
+- TON payments are credited by the poller only, once per transaction
+  (`ton_payments_processed`, which also records uncredited TON for review); the
+  HMAC-verified TonAPI webhook just wakes it. First deploy: reconcile the
+  cutover window (docs/ENV-VARS.md); never delete bot_state `ton_poller_lt_v2`
+- A seal's credit is taken (one conditional UPDATE) before the seal is sent,
+  and given back if it is not sent
 - Extracted config.py and utils/ for modularity
 - Fixed WalletV5R1 (was using V4R2)
 

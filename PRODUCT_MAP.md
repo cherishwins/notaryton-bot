@@ -57,8 +57,8 @@ USER SENDS FILE
                                            |
                                            v
                               +------------------------+
-                              | TonAPI webhook detects |
-                              | payment, auto-seals    |
+                              | Poller credits payment |
+                              | once; tap to seal      |
                               +------------------------+
                                            |
                                            v
@@ -94,7 +94,7 @@ USER SENDS FILE
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Star payments | WORKING | Telegram checkout flow |
-| TON payments | WORKING | TonAPI webhook auto-detection |
+| TON payments | WORKING | Wallet poller credits each tx once; signed TonAPI webhook only wakes it |
 | File hashing | WORKING | SHA-256 |
 | DB storage | WORKING | PostgreSQL on Render |
 | Blockchain write | WORKING | pytoniq + WalletV5R1 |
@@ -103,7 +103,7 @@ USER SENDS FILE
 | TG channel post | WORKING | @MemeSealTON |
 | Subscription check | WORKING | 30-day tracking |
 | Referral system | WORKING | 5% commission |
-| Withdrawal | WORKING | Min 0.05 TON |
+| Withdrawal | OFF by default | Sends TON only with `WITHDRAWALS_ENABLED=true`. Min 0.05 TON |
 | i18n (EN/RU/ZH) | WORKING | Auto-detect from Telegram |
 
 ---
@@ -239,7 +239,7 @@ REQUIRED TO MONETIZE:
 | `/api/v1/batch` | POST | Batch seal (up to 50) | WORKING |
 | `/api/v1/lottery/pot` | GET | Get pot stats | WORKING |
 | `/api/v1/lottery/tickets/{user_id}` | GET | User's tickets | WORKING |
-| `/api/v1/casino/bet` | POST | Place bet (demo) | DEMO ONLY |
+| `/api/v1/casino/*` | GET/POST | Chips, bets, balance | OFF unless `CASINO_ENABLED=true`; then needs Telegram initData |
 
 ### Authentication
 - API keys (generated via `/api` command)
@@ -274,8 +274,10 @@ SUNDAY 8PM UTC
       |
       v
 +------------------+
-| Winner gets pot  |
-| Auto-payout TON  |
+| Winner's prize   |
+| held for payout  |
+| (TON auto-payout |
+| only if enabled) |
 | Announce on X+TG |
 +------------------+
       |
@@ -316,7 +318,7 @@ EVERY TIME USER B PAYS
 USER A gets 5% commission
       |
       v
-USER A can /withdraw to TON wallet (min 0.05 TON)
+USER A can /withdraw to TON wallet (min 0.05 TON) when WITHDRAWALS_ENABLED=true
 ```
 
 ---
@@ -395,7 +397,7 @@ USER A can /withdraw to TON wallet (min 0.05 TON)
 
 1. **MemeSeal core flow** - File -> Pay -> Seal -> Verify
 2. **Star payments** - Telegram checkout
-3. **TON payments** - Auto-detection via TonAPI webhook
+3. **TON payments** - Wallet poller (a signed TonAPI webhook makes it poll at once)
 4. **Lottery system** - Pot grows, draws work
 5. **Referral system** - Tracking + withdrawals
 6. **MemeScan commands** - All 4 commands work
@@ -412,7 +414,7 @@ USER A can /withdraw to TON wallet (min 0.05 TON)
 |------|--------|----------|--------|
 | Casino real money | NOT BUILT | HIGH | 2-3 days |
 | memeseal.vercel.app | 401 ERROR | LOW | Delete it |
-| Lottery auto-payout | UNTESTED | HIGH | Test needed |
+| Lottery auto-payout | OFF by default (`LOTTERY_AUTO_PAYOUT_ENABLED`) | HIGH | `POST /admin/void-legacy-lottery` once right after deploy (no draw runs until it has), then legal opinion first |
 | Premium MemeScan | NOT BUILT | MEDIUM | 1-2 days |
 | Whale alerts | NOT BUILT | LOW | 2-3 days |
 

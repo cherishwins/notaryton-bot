@@ -6,7 +6,13 @@ Production: https://notaryton.com
 ```
 
 ## Authentication
-Use your Telegram user ID as the API key. Get it via `/api` command in @MemeSealTON_bot.
+Send `/api` to @MemeSealTON_bot or @NotaryTON_bot (subscribers only) to get an API key
+(`nt_...`). It is a secret shown once; running `/api` again issues a new key and revokes
+the old one. A Telegram user ID is not a key: requests that send one get `401 invalid api key`.
+Each key may order `API_SEALS_PER_HOUR` seals per hour (default 30); a batch counts every
+contract and is refused whole with `429` when it would go over. Every attempt that passes
+authentication and the subscription check counts, including one that then fails
+("Failed to fetch contract", a failed send, a failed batch item).
 
 **Requirements**: Active subscription (15 Stars or 0.3 TON/month)
 
@@ -23,7 +29,7 @@ Notarize a single TON contract with optional metadata.
 #### Request Body
 ```json
 {
-  "api_key": "123456789",
+  "api_key": "nt_your_key_from_/api",
   "contract_address": "EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG",
   "metadata": {
     "project_name": "MyCoin",
@@ -59,7 +65,7 @@ Notarize a single TON contract with optional metadata.
 curl -X POST https://notaryton.com/api/v1/notarize \
   -H 'Content-Type: application/json' \
   -d '{
-    "api_key": "123456789",
+    "api_key": "nt_your_key_from_/api",
     "contract_address": "EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG",
     "metadata": {
       "project_name": "MyCoin"
@@ -73,12 +79,14 @@ curl -X POST https://notaryton.com/api/v1/notarize \
 
 **POST** `/api/v1/batch`
 
-Notarize up to 50 contracts in a single request.
+Notarize up to 50 contracts in a single request, and never more than the hourly budget
+(`API_SEALS_PER_HOUR`, default 30): a larger batch gets `400 batch larger than hourly budget`
+with `limit_per_hour`, since waiting would never let it through. Split it instead.
 
 #### Request Body
 ```json
 {
-  "api_key": "123456789",
+  "api_key": "nt_your_key_from_/api",
   "contracts": [
     {
       "address": "EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG",
@@ -119,7 +127,7 @@ Notarize up to 50 contracts in a single request.
 curl -X POST https://notaryton.com/api/v1/batch \
   -H 'Content-Type: application/json' \
   -d '{
-    "api_key": "123456789",
+    "api_key": "nt_your_key_from_/api",
     "contracts": [
       {"address": "EQ...", "name": "Coin1"},
       {"address": "EQ...", "name": "Coin2"}
@@ -170,8 +178,9 @@ curl https://notaryton.com/api/v1/verify/a3f8b92c1e4d5678901234567890abcdef12345
 ## Rate Limits
 
 - **Free Tier**: Not available (subscription required)
-- **Subscription**: 1,000 requests/day
-- **Batch Endpoint**: Max 50 contracts per request
+- **Subscription**: `API_SEALS_PER_HOUR` seals per key per hour (default 30)
+- **Batch Endpoint**: Max 50 contracts per request, and at most `API_SEALS_PER_HOUR` (default 30)
+- **Every attempt counts**: a request that fails after the subscription check still uses its seats
 - **Verification Endpoint**: Unlimited (public)
 
 ---
@@ -180,11 +189,14 @@ curl https://notaryton.com/api/v1/verify/a3f8b92c1e4d5678901234567890abcdef12345
 
 | Code | Message | Solution |
 |------|---------|----------|
-| 400 | Missing api_key or contract_address | Check request body |
-| 401 | No active subscription | Subscribe via @MemeSealTON_bot |
-| 404 | Contract not found | Verify contract address |
-| 429 | Rate limit exceeded | Upgrade plan or wait |
-| 500 | Internal server error | Contact support |
+| 400 | invalid body | Send a JSON object |
+| 400 | batch larger than hourly budget | Split the batch into at most `limit_per_hour` contracts |
+| 401 | invalid api key | Missing, or not an `nt_` key from `/api` |
+| 200 | Missing api_key or contract_address (`success: false`) | Check request body |
+| 200 | No active subscription (`success: false`) | Subscribe via @MemeSealTON_bot |
+| 200 | Failed to fetch contract (`success: false`) | Verify contract address (the attempt counted against the budget) |
+| 429 | rate limit exceeded | Wait for the hourly window; the budget is per key |
+| 500 | internal error | Retry later or contact support |
 
 ---
 
@@ -194,7 +206,7 @@ curl https://notaryton.com/api/v1/verify/a3f8b92c1e4d5678901234567890abcdef12345
 ```python
 import requests
 
-API_KEY = "123456789"
+API_KEY = "nt_your_key_from_/api"
 BASE_URL = "https://notaryton.com"
 
 def notarize_contract(address, name=""):
@@ -218,7 +230,7 @@ print(f"Verify: {result['verify_url']}")
 ```javascript
 const axios = require('axios');
 
-const API_KEY = '123456789';
+const API_KEY = 'nt_your_key_from_/api';
 const BASE_URL = 'https://notaryton.com';
 
 async function notarizeContract(address, name = '') {

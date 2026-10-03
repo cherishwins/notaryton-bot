@@ -19,6 +19,8 @@ Usage:
 
 import os
 import asyncio
+import json
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
@@ -26,6 +28,39 @@ from contextlib import asynccontextmanager
 
 import asyncpg
 from asyncpg import Pool, Connection
+
+# Entries voided by the one-time legacy void (POST /admin/void-legacy-lottery)
+# carry this draw_id. The bot_state key records that the void ran; until it
+# exists, the lottery never sends TON (see execute_lottery_draw in bot.py).
+VOID_DRAW_ID = -1
+LEGACY_LOTTERY_VOID_KEY = "migration_lottery_legacy_voided_v1"
+
+# Draws take this transaction-scoped advisory lock, so two draws (two
+# processes during a deploy, two replicas waking at Sunday 00:00) never
+# claim entries at the same time.
+LOTTERY_DRAW_LOCK = 0x4C4F5454  # "LOTT"
+# 1 Star is worth about this much TON (a rough conversion).
+STAR_TON = 0.001
+
+
+def pot_stars_from_entries(entry_stars: int) -> int:
+    """The pot is 20% of the stars behind the entries."""
+    return int(entry_stars * 0.2)
+
+
+def _parse_void_record(value: str) -> Dict[str, Any]:
+    """The count and time a recorded legacy void carries, as far as they can be read."""
+    try:
+        record = json.loads(value)
+        parsed = {"voided": int(record["voided"]), "at": str(record["at"])}
+        if "chip_balances_cut" in record:
+            parsed["chip_balances_cut"] = int(record["chip_balances_cut"])
+        return parsed
+    except (ValueError, TypeError, KeyError):
+        # Written by the old startup migration as "<time>Z UPDATE <n>".
+        at, _, result = value.partition(" ")
+        count = result.rsplit(" ", 1)[-1]
+        return {"voided": int(count) if count.isdigit() else None, "at": at or None}
 
 # ========================
 # MODELS (Dataclasses)
@@ -98,6 +133,22 @@ class LotteryEntry:
     created_at: Optional[datetime] = None
     draw_id: Optional[int] = None  # Which draw this entry is for (null = current)
     won: bool = False
+
+
+@dataclass
+class DrawResult:
+    """What one draw claimed: the winner, and the entries and stars it took from the pot."""
+    winner_id: int
+    entries: int
+    entry_stars: int
+
+    @property
+    def pot_stars(self) -> int:
+        return pot_stars_from_entries(self.entry_stars)
+
+    @property
+    def pot_ton(self) -> float:
+        return self.pot_stars * STAR_TON
 
 
 @dataclass
@@ -291,13 +342,20 @@ class UserRepository:
                 ON CONFLICT (user_id) DO UPDATE SET total_paid = users.total_paid + $2
             """, user_id, amount)
 
-    async def deduct_payment(self, user_id: int, amount: float) -> None:
-        """Deduct from user's total paid (for per-use payments)"""
+    async def deduct_payment(self, user_id: int, amount: float) -> bool:
+        """Take amount from the user's credit if it covers it. True if taken.
+
+        One conditional UPDATE, so concurrent seals cannot all pass a check
+        made before any of them debits: one credit pays for one seal, and the
+        balance never goes negative.
+        """
         async with self._pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE users SET total_paid = total_paid - $2 WHERE user_id = $1",
-                user_id, amount
-            )
+            taken = await conn.fetchval("""
+                UPDATE users SET total_paid = total_paid - $2
+                WHERE user_id = $1 AND total_paid >= $2
+                RETURNING total_paid
+            """, user_id, amount)
+            return taken is not None
 
     async def get_referral_stats(self, user_id: int) -> Dict[str, Any]:
         """Get user's referral stats"""
@@ -372,6 +430,34 @@ class UserRepository:
                 UPDATE users SET total_withdrawn = total_withdrawn + $2
                 WHERE user_id = $1
             """, user_id, amount)
+
+    async def reserve_withdrawal(self, user_id: int, minimum: float) -> float:
+        """Mark the user's whole available balance as withdrawn, before any send.
+
+        Returns the amount reserved, or 0 if the balance is below `minimum`.
+        A compare-and-set, not a lock: the UPDATE only applies while the
+        balance still holds at least what was read. Postgres re-checks that
+        WHERE against the newest row once a concurrent UPDATE commits, so of
+        two /withdraw commands that read the same balance, the second matches
+        no row and reserves nothing.
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT COALESCE(referral_earnings, 0) - COALESCE(total_withdrawn, 0) AS available
+                FROM users WHERE user_id = $1
+            """, user_id)
+            if not row:
+                return 0.0
+            available = row['available']
+            if available <= 0 or available < minimum:
+                return 0.0
+            reserved = await conn.fetchval("""
+                UPDATE users SET total_withdrawn = COALESCE(total_withdrawn, 0) + $2
+                WHERE user_id = $1
+                  AND COALESCE(referral_earnings, 0) - COALESCE(total_withdrawn, 0) >= $2
+                RETURNING user_id
+            """, user_id, available)
+            return float(available) if reserved is not None else 0.0
 
     async def get_by_referral_code(self, code: str) -> Optional[User]:
         """Get user by referral code"""
@@ -576,13 +662,31 @@ class LotteryRepository:
             """)
             # 20% of each star payment goes to pot
             total_stars = row['total'] if row else 0
-            return int(total_stars * 0.2)
+            return pot_stars_from_entries(total_stars)
 
     async def get_pot_size_ton(self) -> float:
         """Get pot size converted to TON (rough estimate)"""
         stars = await self.get_pot_size_stars()
-        # 1 Star ≈ 0.001 TON (rough conversion)
-        return stars * 0.001
+        return stars * STAR_TON
+
+    async def get_entry_stars(self, user_id: Optional[int] = None) -> int:
+        """Stars behind the current entries: one user's, or everyone's.
+
+        The draw is weighted by these, so odds are a user's stars over the
+        total, not a count of rows.
+        """
+        async with self._pool.acquire() as conn:
+            if user_id is None:
+                total = await conn.fetchval("""
+                    SELECT COALESCE(SUM(amount_stars), 0) FROM lottery_entries
+                    WHERE draw_id IS NULL
+                """)
+            else:
+                total = await conn.fetchval("""
+                    SELECT COALESCE(SUM(amount_stars), 0) FROM lottery_entries
+                    WHERE draw_id IS NULL AND user_id = $1
+                """, user_id)
+            return int(total or 0)
 
     async def get_unique_participants(self) -> int:
         """Get number of unique participants in current draw"""
@@ -593,33 +697,159 @@ class LotteryRepository:
             """)
             return row['count'] if row else 0
 
-    async def pick_winner(self, draw_id: int) -> Optional[int]:
-        """Randomly pick a winner from current entries (weighted by entry count - more entries = more chances)"""
+    async def pick_winner(self, draw_id: int) -> Optional[DrawResult]:
+        """Draw a winner from the current entries, weighted by amount_stars.
+
+        Odds follow the stars each entry put into the pot, not the number of
+        rows, so splitting one wager into many small ones buys no extra
+        chance. The entries are claimed for this draw by one UPDATE inside a
+        transaction, so an entry added mid-draw is either in this draw (and
+        in its prize) or waits for the next one. The prize is computed from
+        the returned entry_stars, never from a pot read before the claim.
+
+        Draws are serialized by an advisory lock, and a draw_id that has
+        already claimed entries or recorded a prize is refused: two draws
+        started in the same second share a draw_id, and the second must
+        neither claim entries under it nor hand back the first one's.
+        Returns None when there is nothing to draw (or the id is taken).
+        """
         async with self._pool.acquire() as conn:
-            # Pick random entry (each entry = equal chance, so more entries = better odds)
-            row = await conn.fetchrow("""
-                SELECT user_id FROM lottery_entries
-                WHERE draw_id IS NULL
-                ORDER BY RANDOM()
-                LIMIT 1
-            """)
-            if row:
-                winner_id = row['user_id']
-                # Mark all current entries with this draw_id
-                await conn.execute("""
-                    UPDATE lottery_entries SET draw_id = $1 WHERE draw_id IS NULL
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock($1)", LOTTERY_DRAW_LOCK)
+                taken = await conn.fetchval("""
+                    SELECT EXISTS (SELECT 1 FROM lottery_entries WHERE draw_id = $1)
+                        OR EXISTS (SELECT 1 FROM lottery_prizes WHERE draw_id = $1)
                 """, draw_id)
-                # Mark ONE winner entry using subquery (PostgreSQL compatible)
-                await conn.execute("""
-                    UPDATE lottery_entries SET won = TRUE
-                    WHERE id = (
-                        SELECT id FROM lottery_entries
-                        WHERE user_id = $1 AND draw_id = $2
-                        LIMIT 1
+                if taken:
+                    print(f"⚠️ Lottery draw {draw_id} already ran; not drawing again")
+                    return None
+                rows = await conn.fetch("""
+                    UPDATE lottery_entries SET draw_id = $1
+                    WHERE draw_id IS NULL
+                    RETURNING id, user_id, amount_stars
+                """, draw_id)
+                rows = sorted(rows, key=lambda r: r['id'])
+                total = sum(max(0, r['amount_stars'] or 0) for r in rows)
+                if total <= 0:
+                    # Nothing to weigh: hand back exactly the entries this
+                    # call claimed, to the next draw.
+                    if rows:
+                        await conn.execute(
+                            "UPDATE lottery_entries SET draw_id = NULL WHERE id = ANY($1::int[])",
+                            [r['id'] for r in rows])
+                    return None
+                ticket = secrets.randbelow(total)
+                winner_entry = None
+                for r in rows:
+                    ticket -= max(0, r['amount_stars'] or 0)
+                    if ticket < 0:
+                        winner_entry = r
+                        break
+                await conn.execute(
+                    "UPDATE lottery_entries SET won = TRUE WHERE id = $1", winner_entry['id'])
+                return DrawResult(winner_id=winner_entry['user_id'], entries=len(rows),
+                                  entry_stars=total)
+
+    async def void_legacy_entries(self) -> Dict[str, Any]:
+        """Take every undrawn entry made before this call out of the pot, once.
+
+        Run by the operator through POST /admin/void-legacy-lottery, never on
+        startup: it voids tickets honest users bought with Stars as well as
+        the forged ones, so it is a decision, not a migration. Before Round 1,
+        POST /api/v1/casino/bet entered any user_id for any amount with no
+        payment, and /admin/seed-lottery added unbacked "house" entries for
+        user 1, so the open pot cannot be told apart from forged stars.
+
+        Voided rows get draw_id = VOID_DRAW_ID, which no draw uses, so pot,
+        ticket counts and pick_winner (all "draw_id IS NULL") skip them.
+        Entries created after the call began are left alone. The bot_state
+        key records the count and time; a second call finds it, changes
+        nothing, and reports the first run. One transaction, serialized by
+        a lock on bot_state so two concurrent calls cannot both void.
+
+        The same forgery minted casino chips, and a wager of chips makes a
+        lottery entry after the void, so the same transaction takes back
+        the chips claimed wins could account for (_cut_claimed_win_chips).
+        A void recorded before that step existed gets it on the next call.
+
+        Returns {"already_done": bool, "voided": int | None, "at": str | None,
+        "chip_balances_cut": int}.
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("LOCK TABLE bot_state IN SHARE ROW EXCLUSIVE MODE")
+                done = await conn.fetchval(
+                    "SELECT value FROM bot_state WHERE key = $1", LEGACY_LOTTERY_VOID_KEY)
+                if done is not None:
+                    record = _parse_void_record(done)
+                    if "chip_balances_cut" not in record:
+                        record["chip_balances_cut"] = await self._cut_claimed_win_chips(conn)
+                        await conn.execute(
+                            "UPDATE bot_state SET value = $2 WHERE key = $1",
+                            LEGACY_LOTTERY_VOID_KEY, json.dumps(record))
+                    return {"already_done": True, **record}
+                voided = await conn.fetchval("""
+                    WITH voided AS (
+                        UPDATE lottery_entries SET draw_id = $1
+                        WHERE draw_id IS NULL
+                          AND (created_at IS NULL OR created_at <= LOCALTIMESTAMP)
+                        RETURNING 1
                     )
-                """, winner_id, draw_id)
-                return winner_id
-            return None
+                    SELECT COUNT(*) FROM voided
+                """, VOID_DRAW_ID)
+                chip_balances_cut = await self._cut_claimed_win_chips(conn)
+                at = f"{datetime.utcnow().isoformat()}Z"
+                await conn.execute("""
+                    INSERT INTO bot_state (key, value) VALUES ($1, $2)
+                """, LEGACY_LOTTERY_VOID_KEY, json.dumps({
+                    "voided": int(voided), "at": at, "chip_balances_cut": chip_balances_cut}))
+        print(f"🧹 Lottery: voided {voided} undrawn legacy entries and cut the claimed-win chips "
+              f"of {chip_balances_cut} casino balances (operator call)")
+        return {"already_done": False, "voided": int(voided), "at": at,
+                "chip_balances_cut": chip_balances_cut}
+
+    @staticmethod
+    async def _cut_claimed_win_chips(conn) -> int:
+        """Take back every chip a claimed casino win could account for.
+
+        Before Round 1, /api/v1/casino/play credited whatever "payout" the
+        client sent (casino_balances.total_won) with no authentication, and
+        nothing credits a win any more. A balance keeps at most what
+        deposits alone explain. Returns how many balances were cut.
+        """
+        cut = await conn.fetchval("""
+            WITH cut AS (
+                UPDATE casino_balances
+                SET chips = GREATEST(0, chips - total_won), updated_at = NOW()
+                WHERE total_won > 0 AND chips > 0
+                RETURNING 1
+            )
+            SELECT COUNT(*) FROM cut
+        """)
+        return int(cut)
+
+    async def legacy_entries_voided(self) -> bool:
+        """True once void_legacy_entries has run. Auto-payout sends nothing until then."""
+        async with self._pool.acquire() as conn:
+            value = await conn.fetchval(
+                "SELECT value FROM bot_state WHERE key = $1", LEGACY_LOTTERY_VOID_KEY)
+            return value is not None
+
+    async def record_prize(self, draw_id: int, user_id: int, amount_ton: float, status: str) -> None:
+        """Record a draw's prize in its own ledger.
+
+        Prizes are kept out of users.referral_earnings on purpose: /withdraw
+        pays that balance, so a prize there would be cashed out by turning on
+        WITHDRAWALS_ENABLED alone, without LOTTERY_AUTO_PAYOUT_ENABLED.
+        status: 'paid' (sent on chain), 'held' (payouts off, or no wallet),
+        'review' (a send raised and may or may not have reached the chain).
+        """
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO lottery_prizes (draw_id, user_id, amount_ton, status)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (draw_id) DO UPDATE SET status = $4, updated_at = NOW()
+            """, draw_id, user_id, amount_ton, status)
 
 
 class CasinoRepository:
@@ -800,6 +1030,77 @@ class ApiKeyRepository:
         """Delete API key"""
         async with self._pool.acquire() as conn:
             await conn.execute("DELETE FROM api_keys WHERE key = $1", key)
+
+    async def replace_for_user(self, user_id: int, key_hash: str) -> None:
+        """Make key_hash the user's only API key, revoking any earlier one."""
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("""
+                    INSERT INTO users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING
+                """, user_id)
+                await conn.execute("DELETE FROM api_keys WHERE user_id = $1", user_id)
+                await conn.execute(
+                    "INSERT INTO api_keys (key, user_id) VALUES ($1, $2)", key_hash, user_id)
+
+
+class TonPaymentRepository:
+    """Which incoming TON transactions have been credited, once each.
+
+    The poller credits a payment only after claiming its key (the service
+    wallet's address and the transaction's logical time, which TON makes
+    unique per account) with an INSERT that does nothing on conflict. A
+    restart, a replayed window, or a second caller therefore cannot credit
+    the same transaction twice.
+
+    status, and what a reviewer does with it:
+      'claimed'        crediting began and the payer's credit was not
+                       confirmed. Check the user's balance or subscription
+                       before crediting by hand.
+      'payer_credited' the payer was credited; the lottery entry, referral
+                       commission or DM did not finish (the process died).
+                       Do not credit the payer again.
+      'partial'        the payer was credited, a later step (lottery entry,
+                       referral commission) failed. Do not credit the payer again.
+      'credited'       done.
+      'failed'         the payer's credit failed and was not applied. Credit by hand.
+      'unmatched'      TON arrived with a memo that is not a user id, or below
+                       the minimum: nothing was credited. memo holds the comment.
+      'precutover'     arrived before the poller's first anchor; the old
+                       webhook may or may not have credited it. Check, then decide.
+    Nothing retries any of these automatically.
+    """
+
+    def __init__(self, pool: Pool):
+        self._pool = pool
+
+    async def claim(self, tx_key: str, user_id: int, amount_nano: int) -> bool:
+        async with self._pool.acquire() as conn:
+            claimed = await conn.fetchval("""
+                INSERT INTO ton_payments_processed (tx_key, user_id, amount_nano, status)
+                VALUES ($1, $2, $3, 'claimed')
+                ON CONFLICT (tx_key) DO NOTHING
+                RETURNING tx_key
+            """, tx_key, user_id, amount_nano)
+            return claimed is not None
+
+    async def record_uncredited(self, tx_key: str, amount_nano: int, memo: str, status: str) -> None:
+        """Keep a durable trace of TON that arrived and was not credited.
+
+        status is 'unmatched' or 'precutover'. A key already recorded is left as it is.
+        """
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO ton_payments_processed (tx_key, amount_nano, memo, status)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (tx_key) DO NOTHING
+            """, tx_key, amount_nano, memo[:500], status)
+
+    async def set_status(self, tx_key: str, status: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE ton_payments_processed SET status = $2, updated_at = NOW()
+                WHERE tx_key = $1
+            """, tx_key, status)
 
 
 class WalletRepository:
@@ -1159,6 +1460,7 @@ class Database:
         self._tokens: Optional[TokenRepository] = None
         self._wallets: Optional[WalletRepository] = None
         self._casino: Optional[CasinoRepository] = None
+        self._ton_payments: Optional[TonPaymentRepository] = None
 
     @property
     def pool(self) -> Pool:
@@ -1214,6 +1516,12 @@ class Database:
             raise RuntimeError("Database not connected. Call await db.connect() first.")
         return self._casino
 
+    @property
+    def ton_payments(self) -> TonPaymentRepository:
+        if self._ton_payments is None:
+            raise RuntimeError("Database not connected. Call await db.connect() first.")
+        return self._ton_payments
+
     async def connect(self, database_url: Optional[str] = None) -> None:
         """
         Connect to the database and initialize connection pool.
@@ -1257,6 +1565,7 @@ class Database:
         self._tokens = TokenRepository(self._pool)
         self._wallets = WalletRepository(self._pool)
         self._casino = CasinoRepository(self._pool)
+        self._ton_payments = TonPaymentRepository(self._pool)
 
         # Initialize schema
         await self._init_schema()
@@ -1276,6 +1585,7 @@ class Database:
             self._tokens = None
             self._wallets = None
             self._casino = None
+            self._ton_payments = None
             print("Database disconnected")
 
     async def _init_schema(self) -> None:
@@ -1351,6 +1661,34 @@ class Database:
                     won BOOLEAN DEFAULT FALSE
                 )
             """)
+
+            # Lottery prizes, one row per draw. Kept apart from
+            # users.referral_earnings so /withdraw can never pay a prize.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS lottery_prizes (
+                    draw_id BIGINT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    amount_ton DECIMAL(20, 8) NOT NULL,
+                    status VARCHAR(20) NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+
+            # Incoming TON transactions already credited (see TonPaymentRepository)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS ton_payments_processed (
+                    tx_key VARCHAR(150) PRIMARY KEY,
+                    user_id BIGINT,
+                    amount_nano BIGINT,
+                    memo TEXT,
+                    status VARCHAR(20) NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            await conn.execute(
+                "ALTER TABLE ton_payments_processed ADD COLUMN IF NOT EXISTS memo TEXT")
 
             # Casino balances table - THE MONEY MAKER 💰
             await conn.execute("""

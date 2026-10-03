@@ -88,7 +88,9 @@ python bot.py
 - **POST /api/v1/notarize** - Third-party bots can integrate NotaryTON
 - **POST /api/v1/batch** - High-volume batch notarization (50 contracts/request)
 - **GET /api/v1/verify/{hash}** - Public verification (builds trust/network effects)
-- Authentication via Telegram user_id as API key (subscription required)
+- Authentication via a random `nt_` API key that `/api` issues to subscribers (shown once,
+  stored only as its SHA-256 hash, reissuing revokes the old one). A Telegram user id is not a key
+- Each key may order `API_SEALS_PER_HOUR` seals per hour (default 30); a batch may not exceed it
 
 ### Referral System (Network Effects)
 - Users get unique referral codes: `REF{user_id}`

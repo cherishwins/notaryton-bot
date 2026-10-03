@@ -129,6 +129,7 @@ def test_contract_webhooks_reject_bad_signature(client, monkeypatch, path, secre
 ADMIN_CALLS = [
     ("/admin/seed-lottery", {"amount_stars": 1}),
     ("/admin/import-ton-labels", {}),
+    ("/admin/void-legacy-lottery", {}),
     ("/api/v1/kols/seed", {}),
 ]
 
