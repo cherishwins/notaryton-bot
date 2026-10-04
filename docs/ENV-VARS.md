@@ -55,6 +55,105 @@
 | `TONAPI_CASINO_KEY` | TonConsole | Webhook for casino |
 | `TONAPI_TOKENS_KEY` | TonConsole | Webhook for tokens |
 
+### Money switches (off unless exactly `true`)
+
+These move value at a user's request or hold user balances. Leave them unset
+until a written Canadian legal opinion says otherwise.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CASINO_ENABLED` | off | `/api/v1/casino/*`. Off: 503. On: user routes need `X-Telegram-Init-Data` signed by `BOT_TOKEN` or `MEMESEAL_BOT_TOKEN` |
+| `CASINO_INIT_DATA_MAX_AGE` | 86400 | Seconds signed initData stays valid |
+| `LOTTERY_AUTO_PAYOUT_ENABLED` | off | Sunday draw sends the pot in TON to the winner's wallet. Off: the prize is held in `lottery_prizes` for the operator. Whatever its value, no draw runs at all until `POST /admin/void-legacy-lottery` has run (below) |
+| `WITHDRAWALS_ENABLED` | off | `/withdraw` sends referral earnings in TON. `/api/v1/casino/withdraw`: 503 while off, 501 when on (no cash-out exists) |
+| `API_SEALS_PER_HOUR` | 30 | Seals one `/api` key may order per hour (counted per worker process). Also the largest batch `/api/v1/batch` accepts |
+
+Lottery prizes are never part of the `/withdraw` balance: each draw writes one
+row to `lottery_prizes` (`held`, `sending`, `paid` or `review`), and only
+`LOTTERY_AUTO_PAYOUT_ENABLED` can send one.
+
+### Right after deploying this version: the legacy lottery void
+
+The Sunday draw does not run until the void below has been done: it logs
+`LOTTERY DRAW SKIPPED` every Sunday 00:00 UTC and draws, announces and records
+nothing, so the legacy pot stays in place for the void. Do it right after the
+deploy, before you turn on any switch:
+
+1. Call `POST /admin/void-legacy-lottery` once, with the `X-Admin-Secret`
+   header (401 without it, and always 401 while `ADMIN_SECRET` is unset):
+
+   ```bash
+   curl -X POST -H "X-Admin-Secret: $ADMIN_SECRET" https://<host>/admin/void-legacy-lottery
+   ```
+
+   It voids every undrawn `lottery_entries` row made before the call
+   (`draw_id = -1`), house user 1 rows included, because the old open
+   `/api/v1/casino/bet` let anyone forge entries and `/admin/seed-lottery`
+   added unbacked house entries, and nothing in the table tells those apart
+   from tickets bought with Stars. Honest tickets are voided too, which is why
+   it does not run on its own: nothing voids entries at startup.
+
+   In the same transaction it takes back casino chips that forged wins
+   minted: the old open `/api/v1/casino/play` credited any `payout` the client
+   sent (`casino_balances.total_won`), and wagering those chips would make new
+   lottery entries after the void. Each balance with `total_won > 0` becomes
+   `GREATEST(0, chips - total_won)`, which keeps only what deposits can explain.
+
+   It records the counts and time in `bot_state` key
+   `migration_lottery_legacy_voided_v1` and answers
+   `{"ok": true, "already_done": false, "voided": <n>, "at": "<UTC time>", "chip_balances_cut": <n>}`.
+   A second call changes nothing and answers `"already_done": true` with the
+   first run's figures.
+2. Audit `users.referral_earnings`. Older versions credited lottery prizes
+   (including any from a forged pot) to that balance, and `/withdraw` pays it.
+   Compare it against the referral commissions you expect and against past
+   winners (`lottery_entries.won = TRUE`) before letting anyone withdraw.
+3. Audit the casino chips the void left: `SELECT user_id, chips,
+   total_deposited, total_wagered, total_won FROM casino_balances WHERE chips > 0
+   ORDER BY chips DESC`. Every remaining chip should be explained by
+   `total_deposited` (chips bought with Stars, plus the purchase bonus) less
+   `total_wagered`. Investigate any balance that is not before turning on
+   `CASINO_ENABLED`: chips are wagered into the lottery pot.
+
+### Right after deploying this version: the TON payment cutover
+
+TON payments are credited only by the poller now; the TonAPI webhook only
+wakes it. On its first start the poller anchors at the wallet's newest
+transaction (bot_state key `ton_poller_lt_v2`, logged as `⚓ Payment poller
+anchored at LT <n>`) and credits nothing at or before it. Payments that
+arrived while no version was crediting (the deploy window, a suspension of
+the host, a failed webhook delivery) are not credited automatically:
+
+1. The poller records the newest 64 incoming payments at or before the anchor
+   in `ton_payments_processed` with status `precutover` and their memo. For each,
+   and for any older transfer to `SERVICE_TON_WALLET` since the old bot last
+   credited (its bot_state key `last_processed_lt`, or the date the host was
+   suspended), check on an explorer whether the user was credited; credit by
+   hand those with a numeric memo that were not, and set their row's status to
+   `credited` (or insert a row keyed `<wallet raw address>:<lt>`).
+2. Never delete `ton_poller_lt_v2`: without it the poller anchors again at
+   the newest transaction and skips everything in between. Restoring an older
+   database dump without it has the same effect.
+
+### The TON payments review queue
+
+`SELECT * FROM ton_payments_processed WHERE status <> 'credited' ORDER BY created_at`
+is the queue. Statuses:
+
+| Status | Meaning | What to do |
+|--------|---------|------------|
+| `claimed` | Crediting began; the payer's credit was not confirmed | Check the user's balance or subscription before crediting by hand |
+| `payer_credited` | Payer credited; lottery entry, referral or DM did not finish | Do not credit the payer again |
+| `partial` | Payer credited; lottery entry or referral commission failed | Do not credit the payer again; add the missing step if wanted |
+| `failed` | The payer's credit failed and was not applied | Credit by hand |
+| `unmatched` | TON arrived with a memo that is not a user id, or below 0.014 TON | Read `memo`; credit or refund by hand |
+| `precutover` | Arrived before the poller's first anchor | See the cutover steps above |
+
+More than 512 new transactions between two polls leave a range the poller did
+not read. It logs `🚨 More than 512 transactions` and writes a bot_state key
+`ton_poller_gap:<from_lt>:<to_lt>`; reconcile that LT range on an explorer
+(`SELECT * FROM bot_state WHERE key LIKE 'ton_poller_gap:%'`).
+
 ---
 
 ## 2. memescan-astro (Vercel)

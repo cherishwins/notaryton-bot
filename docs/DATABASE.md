@@ -11,6 +11,8 @@
 | tracked_tokens | Token rug detection data moat | 30+ and growing |
 | token_events | Significant token events (deploy, rug) | Growing |
 | lottery_entries | Weekly lottery tickets | Cyclic |
+| lottery_prizes | One row per draw: the prize and whether it was paid | Small |
+| ton_payments_processed | Incoming TON transactions, credited once each | Growing |
 | api_keys | API access keys | Small |
 | bot_state | Key-value store for bot state | Tiny |
 | pending_payments | Temporary payment records | Tiny |
@@ -174,10 +176,48 @@ CREATE TABLE lottery_entries (
 ```
 
 **Draw Logic:**
-1. Every Sunday midnight UTC
-2. Random entry wins (weighted by ticket count)
-3. Winner gets pot (20% of all fees that week)
-4. All entries get `draw_id` set, winner gets `won = TRUE`
+1. Every Sunday midnight UTC, and only once `POST /admin/void-legacy-lottery` has run
+2. One transaction claims every open entry (`draw_id` set), under an advisory
+   lock; a `draw_id` that already ran never draws again
+3. Winner is drawn weighted by `amount_stars`, not by row count
+4. The prize is 20% of the claimed entries' stars; winner gets `won = TRUE`
+5. Voided legacy entries carry `draw_id = -1`
+
+### lottery_prizes
+
+```sql
+CREATE TABLE lottery_prizes (
+    draw_id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    amount_ton DECIMAL(20, 8) NOT NULL,
+    status VARCHAR(20) NOT NULL,   -- held | sending | paid | review
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+Never part of the `/withdraw` balance. `held`: payouts off or no wallet;
+`sending`: recorded before the send; `review`: the send raised and may or may
+not have reached the chain (check before paying again).
+
+### ton_payments_processed
+
+```sql
+CREATE TABLE ton_payments_processed (
+    tx_key VARCHAR(150) PRIMARY KEY,   -- "<service wallet raw address>:<lt>"
+    user_id BIGINT,
+    amount_nano BIGINT,
+    memo TEXT,                         -- set for unmatched / precutover rows
+    status VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+The poller claims a key before crediting it, so nothing is credited twice.
+Statuses (`claimed`, `payer_credited`, `partial`, `credited`, `failed`,
+`unmatched`, `precutover`) and the review queue are described in
+`docs/ENV-VARS.md`.
 
 ---
 

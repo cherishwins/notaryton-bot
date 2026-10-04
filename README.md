@@ -137,7 +137,7 @@ notaryton-bot/
 |----------|--------|-------------|
 | `/api/v1/notarize` | POST | Seal a hash on TON |
 | `/api/v1/verify/{hash}` | GET | Check if hash is sealed |
-| `/api/v1/batch` | POST | Batch seal (up to 50) |
+| `/api/v1/batch` | POST | Batch seal (up to 50, and at most `API_SEALS_PER_HOUR`, default 30) |
 
 ### Token Intelligence
 
@@ -222,7 +222,7 @@ See `config.py` for all available options.
 | `/pot` | See lottery pot & countdown |
 | `/mytickets` | Your lottery entries |
 | `/referral` | Get your invite link |
-| `/withdraw` | Cash out referral earnings |
+| `/withdraw` | Cash out referral earnings, not lottery prizes (paused unless `WITHDRAWALS_ENABLED=true`) |
 | `/lang` | Switch language (EN/RU/ZH) |
 
 ### MemeScan (@MemeScanTON_bot)

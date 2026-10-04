@@ -4,7 +4,9 @@ import json
 import os
 import re
 import asyncio
+import secrets
 from datetime import datetime, timedelta
+from urllib.parse import parse_qsl
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -14,11 +16,13 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import Update, LabeledPrice, PreCheckoutQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent, WebAppInfo
 from dotenv import load_dotenv
-from pytoniq import LiteBalancer, WalletV5R1, Address
+# InternalMsgInfo comes through pytoniq (which re-exports pytoniq_core), the
+# package requirements.txt actually declares.
+from pytoniq import LiteBalancer, WalletV5R1, Address, InternalMsgInfo
 import uvicorn
 
 # Database layer (PostgreSQL with Neon)
-from database import db
+from database import db, LEGACY_LOTTERY_VOID_KEY
 
 # Social media auto-poster (X + Telegram channel)
 from social import social_poster, announce_seal
@@ -58,6 +62,46 @@ TONAPI_WEBHOOK_SECRET = os.getenv("TONAPI_WEBHOOK_SECRET", "")
 # X-Admin-Secret header, never the query string (which lands in access logs).
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
 
+def _env_flag(name: str) -> bool:
+    """True only when the variable is exactly "true".
+
+    Strict on purpose: these switches move money, so "True", "1", "yes" or a
+    stray space leave them off rather than guessing what was meant.
+    """
+    return os.getenv(name, "") == "true"
+
+
+# Money switches. Each is off unless set to the literal string "true".
+# Paying a lottery prize or a withdrawal to a wallet the user names is the bot
+# transferring value at a user's request, and holding chips or referral balances
+# is holding user funds. Neither is turned on without a written Canadian legal
+# opinion, so the code that does them stays dormant by default.
+#
+# CASINO_ENABLED: every /api/v1/casino/* route. Off: 503 before the body is read.
+CASINO_ENABLED = _env_flag("CASINO_ENABLED")
+# LOTTERY_AUTO_PAYOUT_ENABLED: the Sunday draw sends the pot in TON to the
+# winner's saved wallet. Off: the prize is held in lottery_prizes. Whatever
+# its value, no draw runs until POST /admin/void-legacy-lottery has run once
+# (see execute_lottery_draw): the pre-fix pot may hold forged entries.
+LOTTERY_AUTO_PAYOUT_ENABLED = _env_flag("LOTTERY_AUTO_PAYOUT_ENABLED")
+# WITHDRAWALS_ENABLED: /withdraw sends referral earnings in TON. Lottery prizes
+# are never part of that balance (see execute_lottery_draw), and
+# /api/v1/casino/withdraw answers 503 while off and 501 when on.
+WITHDRAWALS_ENABLED = _env_flag("WITHDRAWALS_ENABLED")
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, ""))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+# How old (seconds) a Mini App's signed initData may be before the casino API
+# refuses it. Telegram signs it once, when the Mini App opens.
+CASINO_INIT_DATA_MAX_AGE = _positive_int_env("CASINO_INIT_DATA_MAX_AGE", 86400)
+
 # Known deploy bots (add more as needed)
 DEPLOY_BOTS = ["@tondeployer", "@memelaunchbot", "@toncoinbot"]
 
@@ -85,6 +129,21 @@ if memescan_dp:
     memescan_dp.include_router(memescan_router)
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def casino_switch(request: Request, call_next):
+    """Refuse every casino API route while CASINO_ENABLED is off.
+
+    A middleware, not a check in each handler, so the body is never read and a
+    route added later cannot forget it. Added before CORS so CORS stays the
+    outermost layer and the browser can still read the 503.
+    """
+    path = request.url.path
+    if (path == "/api/v1/casino" or path.startswith("/api/v1/casino/")) and not CASINO_ENABLED:
+        return JSONResponse({"error": "casino disabled"}, status_code=503)
+    return await call_next(request)
+
 
 # CORS middleware for casino frontend
 app.add_middleware(
@@ -132,6 +191,23 @@ TRANSLATIONS = {
         "lottery_tickets": "🎫 Lottery tickets: {count}",
         "pot_grew": "💰 Pot grew +{amount} TON",
         "good_luck": "🍀 Good luck on Sunday!",
+        "withdraw_paused": "⏸️ **Withdrawals are paused**\n\nTON withdrawals are switched off for now. Your balance is unchanged and no wallet was saved.",
+        "withdraw_failed": "❌ **Withdrawal Failed**\n\n{amount} TON is held on your account for review. Please contact support.",
+        "lottery_payout_paused": "⏸️ Automatic TON payouts are paused.\n\nYour prize of {amount} TON is recorded and held for you. It is not part of your /withdraw balance; it will be paid when payouts resume.",
+        "lottery_prize_held": "🏆 Your prize of {amount} TON is recorded and held for you. No payout wallet is on file, so it will be paid by hand. It is not part of your /withdraw balance.",
+        "lottery_payout_review": "⚠️ Sending your prize of {amount} TON did not confirm. It is held for review so it cannot be paid twice. Please contact support.",
+        "casino_paused": "⏸️ **The casino is paused**\n\nIt is switched off for now. Your chips are unchanged.",
+        "ton_payment_credited": "✅ **Payment Received!**\n\n{amount} TON credited. You can now seal one file or contract.\n\nSend me a file or contract address! 🔒",
+        "ton_payment_short": "✅ **Payment Received!**\n\n{amount} TON credited. Your balance is {balance} TON and one seal costs {price} TON.\n\nSend {short} TON more with the memo `{memo}` to seal.",
+        "ton_seal_need_payment": "💎 **Pay with TON**\n\nSend **{price} TON** to:\n`{wallet}`\n\n**Memo:** `{memo}`\n\nYour file is kept. Once the payment is credited (about 3 minutes), tap the button below to seal it.",
+        "ton_paid_button": "✅ I've paid, seal it",
+        "seal_retry_unpaid": "⚠️ **Not paid yet**\n\nThis file has no payment behind it. Pay with Stars or TON, then seal it.",
+        "api_requires_sub": "⚠️ **API access requires a subscription**\n\nSubscribe first, then run /api to get your key.",
+        "ton_credit_send_file": "✅ **Payment received**\n\nYour TON credit is ready. Send your file again and I'll seal it.",
+        "ton_not_credited_yet": "⏳ Your payment is not credited yet. It usually takes up to about 3 minutes. Tap again in a minute.",
+        "casino_paused_checkout": "The casino is paused, so chips cannot be bought right now. You were not charged.",
+        "referral_link_line": "🎁 **Your referral link:** {url}\n5% of every payment from people you refer.",
+        "api_key_issued": "🔌 **NotaryTON API**\n\n**Your API key:** `{key}`\n\nKeep it secret. It is shown only once and replaces any key you had before. Run /api again for a new one.\n\n**Endpoints:**\n• POST {url}/api/v1/notarize\n• POST {url}/api/v1/batch\n• GET {url}/api/v1/verify/{{hash}}\n\nSend the key as `api_key` in the JSON body.",
     },
     "ru": {
         "welcome": "🔐 **NotaryTON** - Блокчейн Нотаризация\n\nПечать контрактов, файлов и скриншотов на TON навсегда.\n\n**Команды:**\n/notarize - Запечатать контракт\n/status - Проверить подписку\n/subscribe - Безлимит\n/referral - Заработай 5%\n/withdraw - Вывести заработок\n/lang - Сменить язык",
@@ -153,6 +229,23 @@ TRANSLATIONS = {
         "lottery_tickets": "🎫 Лотерейные билеты: {count}",
         "pot_grew": "💰 Банк вырос на +{amount} TON",
         "good_luck": "🍀 Удачи в воскресенье!",
+        "withdraw_paused": "⏸️ **Вывод средств приостановлен**\n\nВывод TON сейчас отключён. Ваш баланс не изменился, кошелёк не сохранён.",
+        "withdraw_failed": "❌ **Вывод не выполнен**\n\n{amount} TON удержаны на вашем счёте для проверки. Пожалуйста, свяжитесь с поддержкой.",
+        "lottery_payout_paused": "⏸️ Автоматические выплаты TON приостановлены.\n\nВаш выигрыш {amount} TON записан и зарезервирован для вас. Он не входит в баланс /withdraw и будет выплачен, когда выплаты возобновятся.",
+        "lottery_prize_held": "🏆 Ваш выигрыш {amount} TON записан и зарезервирован для вас. Кошелёк для выплаты не указан, поэтому он будет выплачен вручную. Он не входит в баланс /withdraw.",
+        "lottery_payout_review": "⚠️ Отправка вашего выигрыша {amount} TON не подтвердилась. Он удержан для проверки, чтобы не быть выплаченным дважды. Пожалуйста, свяжитесь с поддержкой.",
+        "casino_paused": "⏸️ **Казино приостановлено**\n\nСейчас оно отключено. Ваши фишки не изменились.",
+        "ton_payment_credited": "✅ **Платёж получен!**\n\nЗачислено {amount} TON. Теперь вы можете запечатать один файл или контракт.\n\nОтправьте мне файл или адрес контракта! 🔒",
+        "ton_payment_short": "✅ **Платёж получен!**\n\nЗачислено {amount} TON. Ваш баланс {balance} TON, одна печать стоит {price} TON.\n\nОтправьте ещё {short} TON с комментарием `{memo}`, чтобы запечатать.",
+        "ton_seal_need_payment": "💎 **Оплата в TON**\n\nОтправьте **{price} TON** на:\n`{wallet}`\n\n**Комментарий:** `{memo}`\n\nВаш файл сохранён. Когда платёж будет зачислен (около 3 минут), нажмите кнопку ниже, чтобы запечатать его.",
+        "ton_paid_button": "✅ Я оплатил, запечатать",
+        "seal_retry_unpaid": "⚠️ **Ещё не оплачено**\n\nЗа этот файл нет оплаты. Оплатите Звёздами или TON, затем запечатайте.",
+        "api_requires_sub": "⚠️ **Доступ к API требует подписки**\n\nСначала оформите подписку, затем выполните /api, чтобы получить ключ.",
+        "ton_credit_send_file": "✅ **Платёж получен**\n\nВаш TON-кредит готов. Отправьте файл ещё раз, и я его запечатаю.",
+        "ton_not_credited_yet": "⏳ Платёж ещё не зачислен. Обычно это занимает до 3 минут. Нажмите ещё раз через минуту.",
+        "casino_paused_checkout": "Казино приостановлено, поэтому фишки сейчас купить нельзя. С вас ничего не списано.",
+        "referral_link_line": "🎁 **Ваша реферальная ссылка:** {url}\n5% с каждого платежа приглашённых вами людей.",
+        "api_key_issued": "🔌 **NotaryTON API**\n\n**Ваш API-ключ:** `{key}`\n\nХраните его в секрете. Он показывается только один раз и заменяет прежний ключ. Выполните /api снова, чтобы получить новый.\n\n**Эндпоинты:**\n• POST {url}/api/v1/notarize\n• POST {url}/api/v1/batch\n• GET {url}/api/v1/verify/{{hash}}\n\nПередавайте ключ как `api_key` в теле JSON.",
     },
     "zh": {
         "welcome": "🔐 **NotaryTON** - 区块链公证\n\n在TON上永久封存合约、文件和截图。\n\n**命令:**\n/notarize - 封存合约\n/status - 查看订阅\n/subscribe - 无限封存\n/referral - 赚取5%佣金\n/withdraw - 提取收益\n/lang - 更改语言",
@@ -174,6 +267,23 @@ TRANSLATIONS = {
         "lottery_tickets": "🎫 彩票: {count}张",
         "pot_grew": "💰 奖池增加 +{amount} TON",
         "good_luck": "🍀 祝周日好运!",
+        "withdraw_paused": "⏸️ **提款已暂停**\n\nTON提款目前已关闭。您的余额未变,也未保存钱包地址。",
+        "withdraw_failed": "❌ **提款失败**\n\n{amount} TON已保留在您的账户中等待审核。请联系客服。",
+        "lottery_payout_paused": "⏸️ TON自动派奖已暂停。\n\n您的奖金 {amount} TON 已记录并为您保留。它不计入 /withdraw 余额,将在派奖恢复后支付。",
+        "lottery_prize_held": "🏆 您的奖金 {amount} TON 已记录并为您保留。您尚未设置收款钱包,因此将人工支付。它不计入 /withdraw 余额。",
+        "lottery_payout_review": "⚠️ 您的奖金 {amount} TON 发送未得到确认。为避免重复支付,已保留待审核。请联系客服。",
+        "casino_paused": "⏸️ **赌场已暂停**\n\n目前已关闭。您的筹码未变。",
+        "ton_payment_credited": "✅ **已收到付款!**\n\n已入账 {amount} TON。现在可以封存一个文件或合约。\n\n发送文件或合约地址给我! 🔒",
+        "ton_payment_short": "✅ **已收到付款!**\n\n已入账 {amount} TON。您的余额为 {balance} TON,一次封存需要 {price} TON。\n\n请再发送 {short} TON,备注填写 `{memo}`,即可封存。",
+        "ton_seal_need_payment": "💎 **使用TON支付**\n\n发送 **{price} TON** 到:\n`{wallet}`\n\n**备注:** `{memo}`\n\n您的文件已保留。付款入账后(约3分钟),点击下方按钮进行封存。",
+        "ton_paid_button": "✅ 我已付款,封存",
+        "seal_retry_unpaid": "⚠️ **尚未付款**\n\n此文件没有对应的付款。请先用星星或TON支付,然后封存。",
+        "api_requires_sub": "⚠️ **API访问需要订阅**\n\n请先订阅,然后运行 /api 获取密钥。",
+        "ton_credit_send_file": "✅ **已收到付款**\n\n您的TON额度已到账。请重新发送文件,我会为您封存。",
+        "ton_not_credited_yet": "⏳ 您的付款尚未入账,通常最多需要约3分钟。请一分钟后再点一次。",
+        "casino_paused_checkout": "赌场已暂停,目前无法购买筹码。您未被扣款。",
+        "referral_link_line": "🎁 **您的推荐链接:** {url}\n您推荐的用户每笔付款,您可获得5%。",
+        "api_key_issued": "🔌 **NotaryTON API**\n\n**您的API密钥:** `{key}`\n\n请妥善保密。它只显示一次,并会替换您之前的密钥。再次运行 /api 可获取新密钥。\n\n**接口:**\n• POST {url}/api/v1/notarize\n• POST {url}/api/v1/batch\n• GET {url}/api/v1/verify/{{hash}}\n\n请在JSON请求体中以 `api_key` 发送密钥。",
     }
 }
 
@@ -198,7 +308,7 @@ def generate_payment_memo(user_id: int) -> str:
 # Reverse lookup: memo -> user_id
 payment_memo_lookup = {}  # key: memo, value: {"user_id": int, "timestamp": float}
 
-def get_text(user_id: int, key: str, **kwargs) -> str:
+def get_text(user_id: int, key: str, /, **kwargs) -> str:
     """Get translated text for user"""
     lang = user_languages.get(user_id, "en")
     text = TRANSLATIONS.get(lang, TRANSLATIONS["en"]).get(key, TRANSLATIONS["en"].get(key, key))
@@ -231,6 +341,20 @@ async def set_user_language(user_id: int, lang: str):
     await db.users.set_language(user_id, lang)
 
 
+async def localized(user_id: int, key: str, /, **kwargs) -> str:
+    """get_text in the user's saved language; English if the lookup fails.
+
+    A message about money must still go out when the language lookup cannot.
+    user_id and key are positional-only, so a template field named "key"
+    (api_key_issued's {key}) is a format argument, not a clash.
+    """
+    try:
+        await get_user_language(user_id)
+    except Exception:
+        pass
+    return get_text(user_id, key, **kwargs)
+
+
 # 🐸 CLEANUP TASK - remove expired pending payments every 5 minutes
 async def cleanup_pending_payments():
     """Clean up old pending files and TON payments every 5 minutes"""
@@ -256,112 +380,185 @@ async def cleanup_pending_payments():
         await asyncio.sleep(300)  # Every 5 minutes
 
 
+async def _dm(user_id: int, text: str) -> bool:
+    """Send a DM through whichever bot can reach the user. True if one did."""
+    for send_bot in [memeseal_bot, bot]:
+        if send_bot:
+            try:
+                await send_bot.send_message(user_id, text, parse_mode="Markdown")
+                return True
+            except Exception as e:
+                print(f"⚠️ Could not DM {user_id} via {send_bot}: {e}")
+    return False
+
+
+async def legacy_lottery_voided() -> bool:
+    """True once POST /admin/void-legacy-lottery has run. Any doubt reads as False."""
+    try:
+        return bool(await db.lottery.legacy_entries_voided())
+    except Exception as e:
+        print(f"⚠️ Could not read the legacy lottery void record: {type(e).__name__}: {e}")
+        return False
+
+
+async def execute_lottery_draw():
+    """Run one draw: pick a winner, tell them, and settle the prize.
+
+    The prize goes into the lottery_prizes ledger, never into
+    users.referral_earnings: /withdraw pays that balance, and a prize there
+    would be cashed out by WITHDRAWALS_ENABLED alone. Nothing is drawn at
+    all until the legacy entries have been voided (POST
+    /admin/void-legacy-lottery). TON leaves the service wallet only when
+    LOTTERY_AUTO_PAYOUT_ENABLED is on and the winner has a wallet on file;
+    every other case holds the prize for the operator.
+    """
+    from datetime import timezone
+
+    print("🎰 LOTTERY DRAW STARTING...")
+
+    if not await legacy_lottery_voided():
+        # The open pot may still hold the forged entries from before Round 1.
+        # Drawing it would turn them into a recorded prize, a DM promising
+        # payment and a public announcement, and the void would then find
+        # nothing to void. So nothing is drawn until the operator decides.
+        print("🚨 LOTTERY DRAW SKIPPED: the legacy lottery entries were never voided (bot_state key "
+              f"{LEGACY_LOTTERY_VOID_KEY} is absent). Nothing was drawn, announced or recorded; "
+              "the entries stay in the pot. Call POST /admin/void-legacy-lottery once, after "
+              "auditing referral_earnings and casino chips, to start the weekly draws.")
+        return None
+
+    total_entries = await db.lottery.get_total_entries()
+    if total_entries == 0:
+        print("⚠️ No lottery entries - skipping draw")
+        return None
+
+    # Generate draw ID from timestamp
+    draw_id = int(datetime.now(timezone.utc).timestamp())
+
+    # Pick the winner! The prize is what this draw claimed, not a pot read
+    # before the claim: an entry bought in between is in both or neither.
+    result = await db.lottery.pick_winner(draw_id)
+
+    if not result:
+        print(f"❌ Lottery draw failed - no winner selected")
+        return None
+
+    winner_id = result.winner_id
+    pot_stars = result.pot_stars
+    pot_ton = result.pot_ton
+    total_entries = result.entries
+
+    print(f"🏆 LOTTERY WINNER: User {winner_id} wins {pot_stars} ⭐ ({pot_ton:.4f} TON)!")
+
+    # Notify winner via DM
+    winner_msg = (
+        f"🏆🎰 **YOU WON THE LOTTERY!** 🎰🏆\n\n"
+        f"Prize: **{pot_stars} ⭐** ({pot_ton:.4f} TON)\n"
+        f"Entries: {total_entries} tickets in this draw\n\n"
+        f"Congratulations, degen! 🐸"
+    )
+    await _dm(winner_id, winner_msg)
+
+    # Announce on socials
+    try:
+        await social_poster.post_lottery_winner(winner_id, pot_ton, pot_stars)
+    except Exception as e:
+        print(f"⚠️ Could not post winner to socials: {e}")
+
+    amount = f"{pot_ton:.4f}"
+    try:
+        if not LOTTERY_AUTO_PAYOUT_ENABLED:
+            # Payouts are off: record the prize, move no TON, and say so.
+            await db.lottery.record_prize(draw_id, winner_id, pot_ton, "held")
+            print(f"✅ Prize of {amount} TON held for user {winner_id} (auto-payout disabled)")
+            await _dm(winner_id, await localized(winner_id, "lottery_payout_paused", amount=amount))
+            return winner_id
+
+        winner = await db.users.get(winner_id)
+        if not (winner and winner.withdrawal_wallet and pot_ton >= MIN_WITHDRAWAL_TON):
+            # No wallet or pot too small: hold it for a manual payout.
+            await db.lottery.record_prize(draw_id, winner_id, pot_ton, "held")
+            print(f"✅ Prize of {amount} TON held for user {winner_id} (no wallet or below minimum)")
+            await _dm(winner_id, await localized(winner_id, "lottery_prize_held", amount=amount))
+            return winner_id
+
+        # Recorded before the send, so a crash mid-send leaves a trace.
+        await db.lottery.record_prize(draw_id, winner_id, pot_ton, "sending")
+        try:
+            await send_payout_transaction(
+                winner.withdrawal_wallet,
+                pot_ton,
+                f"MemeSeal Lottery Win! {pot_stars} Stars"
+            )
+        except Exception as payout_err:
+            # The transfer may have reached the chain before this raised (a
+            # liteserver timeout after acceptance, close_all failing), so the
+            # prize is held for review, never credited for a second payout.
+            print(f"⚠️ Lottery payout of {amount} TON to user {winner_id} failed, held for review: "
+                  f"{type(payout_err).__name__}: {payout_err}")
+            await db.lottery.record_prize(draw_id, winner_id, pot_ton, "review")
+            await _dm(winner_id, await localized(winner_id, "lottery_payout_review", amount=amount))
+            return winner_id
+
+        await db.lottery.record_prize(draw_id, winner_id, pot_ton, "paid")
+        print(f"✅ Auto-payout {amount} TON to {winner.withdrawal_wallet[:20]}...")
+        payout_msg = f"💸 **{amount} TON** sent to your wallet!\nCheck: tonscan.org/address/{winner.withdrawal_wallet}"
+        await _dm(winner_id, payout_msg)
+    except Exception as e:
+        print(f"⚠️ Could not process winner payout: {type(e).__name__}: {e}")
+    return winner_id
+
+
+def next_lottery_draw_after(now):
+    """The first Sunday 00:00 UTC strictly after `now`.
+
+    Strictly after: the old loop computed today's midnight whenever it was
+    still hour 0 on a Sunday, so right after a draw it slept a negative time
+    and drew again, over and over, until 01:00.
+    """
+    days_until_sunday = (6 - now.weekday()) % 7
+    next_draw = (now + timedelta(days=days_until_sunday)).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    if next_draw <= now:
+        next_draw += timedelta(days=7)
+    return next_draw
+
+
+# Module-level so tests can replace the waits of the background loops without
+# patching asyncio.sleep for the whole process.
+_sleep = asyncio.sleep
+# Likewise for the background seal tasks the MemeSeal handlers start.
+_spawn = asyncio.create_task
+
+
 # 🎰 LOTTERY DRAW TASK - picks winner every Sunday at 00:00 UTC (midnight)
 async def run_sunday_lottery_draw():
     """Background task: Run lottery draw every Sunday at 00:00 UTC (midnight)"""
     from datetime import timezone
 
+    # The draw this loop last woke for. A sleep can end a little early (the
+    # event loop's clock is not the wall clock), and measuring from "now"
+    # would then schedule that same Sunday again and draw twice.
+    last_draw = None
     while True:
         try:
-            # Calculate time until next Sunday 00:00 UTC (midnight)
             now = datetime.now(timezone.utc)
-            days_until_sunday = (6 - now.weekday()) % 7
-            if days_until_sunday == 0 and now.hour > 0:
-                # It's already past midnight Sunday, wait until next week
-                days_until_sunday = 7
-
-            next_draw = now + timedelta(days=days_until_sunday)
-            next_draw = next_draw.replace(hour=0, minute=0, second=0, microsecond=0)
-
+            next_draw = next_lottery_draw_after(now if last_draw is None else max(now, last_draw))
             sleep_seconds = (next_draw - now).total_seconds()
             hours_until = sleep_seconds / 3600
             print(f"🎰 Lottery draw scheduled for {next_draw.strftime('%Y-%m-%d %H:%M UTC')} ({hours_until:.1f}h from now)")
 
             # Sleep until draw time
-            await asyncio.sleep(sleep_seconds)
+            await _sleep(sleep_seconds)
+            last_draw = next_draw
 
             # === DRAW TIME ===
-            print("🎰 LOTTERY DRAW STARTING...")
-
-            # Get pot size before draw
-            pot_stars = await db.lottery.get_pot_size_stars()
-            pot_ton = await db.lottery.get_pot_size_ton()
-            total_entries = await db.lottery.get_total_entries()
-
-            if total_entries == 0:
-                print("⚠️ No lottery entries - skipping draw")
-                continue
-
-            # Generate draw ID from timestamp
-            draw_id = int(datetime.now(timezone.utc).timestamp())
-
-            # Pick the winner!
-            winner_id = await db.lottery.pick_winner(draw_id)
-
-            if winner_id:
-                print(f"🏆 LOTTERY WINNER: User {winner_id} wins {pot_stars} ⭐ ({pot_ton:.4f} TON)!")
-
-                # Notify winner via DM
-                winner_msg = (
-                    f"🏆🎰 **YOU WON THE LOTTERY!** 🎰🏆\n\n"
-                    f"Prize: **{pot_stars} ⭐** ({pot_ton:.4f} TON)\n"
-                    f"Entries: {total_entries} tickets in this draw\n\n"
-                    f"Congratulations, degen! 🐸\n\n"
-                    f"Prize will be credited to your account."
-                )
-
-                # Try both bots to reach the winner
-                for send_bot in [memeseal_bot, bot]:
-                    if send_bot:
-                        try:
-                            await send_bot.send_message(winner_id, winner_msg, parse_mode="Markdown")
-                            break
-                        except Exception as e:
-                            print(f"⚠️ Could not DM winner via {send_bot}: {e}")
-
-                # Announce on socials
-                try:
-                    await social_poster.post_lottery_winner(winner_id, pot_ton, pot_stars)
-                except Exception as e:
-                    print(f"⚠️ Could not post winner to socials: {e}")
-
-                # Try auto-payout if winner has withdrawal wallet set
-                try:
-                    winner = await db.users.get(winner_id)
-                    if winner and winner.withdrawal_wallet and pot_ton >= MIN_WITHDRAWAL_TON:
-                        # Auto-payout to winner's wallet
-                        try:
-                            await send_payout_transaction(
-                                winner.withdrawal_wallet,
-                                pot_ton,
-                                f"MemeSeal Lottery Win! {pot_stars} Stars"
-                            )
-                            print(f"✅ Auto-payout {pot_ton:.4f} TON to {winner.withdrawal_wallet[:20]}...")
-                            # Notify winner about auto-payout
-                            payout_msg = f"💸 **{pot_ton:.4f} TON** sent to your wallet!\nCheck: tonscan.org/address/{winner.withdrawal_wallet}"
-                            for send_bot in [memeseal_bot, bot]:
-                                if send_bot:
-                                    try:
-                                        await send_bot.send_message(winner_id, payout_msg, parse_mode="Markdown")
-                                        break
-                                    except Exception:
-                                        pass
-                        except Exception as payout_err:
-                            print(f"⚠️ Auto-payout failed, crediting account instead: {payout_err}")
-                            await db.users.add_referral_earnings(winner_id, pot_ton)
-                    else:
-                        # No wallet or pot too small - credit to account
-                        await db.users.add_referral_earnings(winner_id, pot_ton)
-                        print(f"✅ Credited {pot_ton:.4f} TON to winner's account (use /withdraw to claim)")
-                except Exception as e:
-                    print(f"⚠️ Could not process winner payout: {e}")
-            else:
-                print(f"❌ Lottery draw failed - no winner selected")
+            await execute_lottery_draw()
 
         except Exception as e:
             print(f"❌ Lottery draw error: {e}")
             # Don't crash - sleep 1 hour and retry
-            await asyncio.sleep(3600)
+            await _sleep(3600)
 
 
 # Minimum withdrawal amount
@@ -615,93 +812,6 @@ async def send_payout_transaction(destination: str, amount_ton: float, memo: str
             await client.close_all()
 
 
-async def seal_file_from_webhook(user_id: int, file_id: str, file_type: str, progress_msg):
-    """
-    Seal file triggered by TonAPI webhook payment detection.
-    Module-level function that can be called from webhook handler.
-    """
-    file_path = None
-    try:
-        # Determine which bot to use (prefer memeseal_bot)
-        active_bot = memeseal_bot if memeseal_bot else bot
-
-        # Download file
-        if file_type == "photo":
-            file = await active_bot.get_file(file_id)
-            file_path = f"downloads/{file_id}.jpg"
-        else:
-            file = await active_bot.get_file(file_id)
-            file_path = f"downloads/{file_id}"
-
-        os.makedirs("downloads", exist_ok=True)
-        await active_bot.download_file(file.file_path, file_path)
-        file_hash = hash_file(file_path)
-
-        # Seal to blockchain with retries
-        comment = f"MemeSeal:{file_hash[:16]}"
-        sealed = False
-
-        for attempt in range(5):
-            try:
-                await send_ton_transaction(comment)
-                sealed = True
-                break
-            except Exception as e:
-                print(f"⚠️ Webhook seal attempt {attempt+1}/5 failed: {e}")
-                await asyncio.sleep(5)
-
-        if sealed:
-            # Log and announce
-            await log_notarization(user_id, "webhook_ton_instant", file_hash, paid=True)
-
-            # Update progress message with success
-            if progress_msg:
-                try:
-                    await progress_msg.edit_text(
-                        f"✅ **SEALED TO BLOCKCHAIN!** 🐸\n\n"
-                        f"**Hash:** `{file_hash[:16]}...`\n\n"
-                        f"[View on TONScan](https://tonscan.org/) | "
-                        f"[Verify](https://notaryton.com/verify?hash={file_hash})\n\n"
-                        f"On TON forever. Receipts secured.",
-                        parse_mode="Markdown"
-                    )
-                except:
-                    pass
-
-            # Announce to socials
-            asyncio.create_task(announce_seal_to_socials(file_hash))
-            print(f"✅ Webhook seal success for user {user_id}: {file_hash[:16]}")
-        else:
-            if progress_msg:
-                try:
-                    await progress_msg.edit_text(
-                        f"⚠️ **Network Busy**\n\n"
-                        f"Seal failed after 5 attempts.\n"
-                        f"Your payment is credited - send the file again to retry!",
-                        parse_mode="Markdown"
-                    )
-                except:
-                    pass
-            print(f"❌ Webhook seal failed for user {user_id}")
-
-    except Exception as e:
-        print(f"❌ Webhook seal error: {e}")
-        if progress_msg:
-            try:
-                await progress_msg.edit_text(
-                    f"⚠️ **Error sealing**\n\n{str(e)[:100]}\n\nPlease try again.",
-                    parse_mode="Markdown"
-                )
-            except:
-                pass
-    finally:
-        if file_path:
-            try:
-                os.remove(file_path)
-            except:
-                pass
-
-
 async def resolve_ton_dns(domain: str) -> str:
     """Resolve .ton domain to TON address"""
     client = None
@@ -754,22 +864,284 @@ async def resolve_ton_dns(domain: str) -> str:
         if client:
             await client.close_all()
 
-async def poll_wallet_for_payments():
-    """Background task to poll wallet for incoming payments with retry logic"""
-    last_processed_lt = 0
+# A TON payment's comment is the payer's Telegram user id and nothing else.
+# The whole comment must be the id: searching for any digits would pull a
+# number out of a seal hash or an API caller's project name.
+_MEMO_USER_ID = re.compile(r"\s*(\d{1,19})\s*")
 
-    # Load last processed LT from DB
+
+def decode_text_comment(body) -> str:
+    """The text comment in a message body, or "" if it has none.
+
+    A text comment is op 0 (32 bits) followed by a snake-encoded UTF-8 string,
+    which is what wallets (and pytoniq, for our own seals) write. Any other
+    body, including an empty one or one with a non-zero op, is not a comment.
+    """
+    if body is None:
+        return ""
     try:
-        lt_value = await db.bot_state.get('last_processed_lt')
-        if lt_value:
-            last_processed_lt = int(lt_value)
-            print(f"🔄 Resuming payment polling from LT: {last_processed_lt}")
+        s = body.begin_parse()
+        if s.remaining_bits < 32 or s.load_uint(32) != 0:
+            return ""
+        return s.load_snake_string()
+    except Exception:
+        return ""
+
+
+def parse_incoming_payment(tx, service_address):
+    """(amount_nano, memo, src) for a TON payment into the service wallet, else None.
+
+    Only an internal, non-bounced message from another address is a payment.
+    The wallet's own outgoing transactions start with an external message, and
+    every seal is a transfer from the service wallet to itself whose comment
+    can carry text an API caller chose, so both are skipped.
+    """
+    msg = getattr(tx, "in_msg", None)
+    info = getattr(msg, "info", None)
+    if not isinstance(info, InternalMsgInfo) or info.bounced:
+        return None
+    src = info.src
+    if not isinstance(src, Address):
+        return None
+    if isinstance(service_address, str):
+        service_address = Address(service_address)
+    if src.to_str(is_user_friendly=False) == service_address.to_str(is_user_friendly=False):
+        return None
+    return info.value_coins, decode_text_comment(msg.body), src
+
+
+def memo_user_id(memo: str):
+    """The Telegram user id a payment comment names, or None."""
+    match = _MEMO_USER_ID.fullmatch(memo or "")
+    if not match:
+        return None
+    user_id = int(match.group(1))
+    return user_id if 0 < user_id < 2**63 else None
+
+
+# A payment below this is dust and credits nothing (the old single-seal floor).
+TON_MIN_CREDIT = 0.014
+# A payment at or above this buys a month (0.3 TON, less a little for fees).
+TON_SUBSCRIPTION_CREDIT = 0.28
+
+
+async def _notify_user(user_id: int, text: str) -> None:
+    """Best-effort DM about a payment. A failed DM never undoes a credit."""
+    for b in [bot, memeseal_bot]:
+        if b:
+            try:
+                await b.send_message(user_id, text, parse_mode="Markdown")
+                return
+            except Exception:
+                pass
+
+
+async def credit_incoming_payment(user_id: int, amount_ton: float, progress: dict | None = None,
+                                  tx_key: str | None = None):
+    """Credit one TON payment to user_id. Payer first, referrer last.
+
+    The payer's credit comes first so that a failure part way leaves the
+    payer paid and, at worst, a referrer commission missing, never the
+    reverse. Once the payer is credited, progress["payer_credited"] is set
+    and the ledger row says 'payer_credited', so a later failure is never
+    read as "the payer was not paid". process_incoming_payment records the rest.
+    """
+    if amount_ton >= TON_SUBSCRIPTION_CREDIT:
+        await add_subscription(user_id, months=1)
+    else:
+        await db.users.ensure_exists(user_id)
+        await db.users.add_payment(user_id, amount_ton)
+    if progress is not None:
+        progress["payer_credited"] = True
+    if tx_key:
+        await db.ton_payments.set_status(tx_key, "payer_credited")
+
+    if amount_ton >= TON_SUBSCRIPTION_CREDIT:
+        await db.lottery.add_entry(user_id, amount_stars=20)
+        print(f"✅ Activated subscription for user {user_id}")
+        text = (
+            "✅ **Subscription Activated!**\n\n"
+            "You now have unlimited notarizations for 30 days!\n\n"
+            "Send me a file or contract address to seal it! 🔒"
+        )
+    else:
+        await db.lottery.add_entry(user_id, amount_stars=1)
+        print(f"✅ Credited {amount_ton} TON to user {user_id}")
+        # Sealing needs a balance of TON_SINGLE_SEAL, so only say "you can
+        # seal" when the balance really allows it; otherwise say what is short.
+        balance = await db.users.get_total_paid(user_id)
+        if balance >= TON_SINGLE_SEAL:
+            text = await localized(user_id, "ton_payment_credited", amount=f"{amount_ton:.4f}")
+        else:
+            text = await localized(
+                user_id, "ton_payment_short", amount=f"{amount_ton:.4f}",
+                balance=f"{balance:.4f}", price=f"{TON_SINGLE_SEAL}",
+                short=f"{TON_SINGLE_SEAL - balance:.4f}", memo=user_id)
+
+    user = await db.users.get(user_id)
+    if user and user.referred_by:
+        commission = amount_ton * 0.05
+        await db.users.add_referral_earnings(user.referred_by, commission)
+        print(f"💰 Credited {commission:.4f} TON to referrer {user.referred_by}")
+
+    await _notify_user(user_id, text)
+
+
+class PaymentNotRecorded(Exception):
+    """Money arrived and nothing durable says so yet (the ledger write failed).
+
+    The poller must not move past such a transaction: it stops and reads it
+    again next poll. The ledger's ON CONFLICT makes that re-read idempotent.
+    """
+
+
+def ton_tx_key(service_address, lt: int) -> str:
+    """The idempotency key of a transaction on the service wallet: account and LT."""
+    if isinstance(service_address, str):
+        service_address = Address(service_address)
+    return f"{service_address.to_str(is_user_friendly=False)}:{lt}"
+
+
+async def process_incoming_payment(tx_key: str, amount_nano: int, memo: str) -> bool:
+    """Credit a parsed payment at most once. True if this call credited it.
+
+    The claim (an INSERT that does nothing on conflict) comes before any
+    credit, so a restart, a replayed window or a second poller cannot
+    credit the same transaction again. TON that cannot be credited (a memo
+    that is not a user id, or dust) is recorded as 'unmatched'. If the
+    claim or that record cannot be written, PaymentNotRecorded is raised and
+    the poller reads the transaction again later.
+    """
+    amount_ton = amount_nano / 1e9
+    print(f"📥 Incoming payment: {amount_ton} TON, memo: {memo[:64]!r}")
+    user_id = memo_user_id(memo)
+    try:
+        if not user_id or amount_ton < TON_MIN_CREDIT:
+            await db.ton_payments.record_uncredited(tx_key, amount_nano, memo, "unmatched")
+            print(f"📝 Payment {tx_key} not credited (memo is not a user id, or below "
+                  f"{TON_MIN_CREDIT} TON): recorded as 'unmatched' for review")
+            return False
+        claimed = await db.ton_payments.claim(tx_key, user_id, amount_nano)
     except Exception as e:
-        print(f"⚠️ Failed to load last_processed_lt: {e}")
+        raise PaymentNotRecorded(f"{type(e).__name__}: {e}") from e
+    if not claimed:
+        print(f"↩️ Payment {tx_key} already processed, skipping")
+        return False
+    progress = {"payer_credited": False}
+    try:
+        await credit_incoming_payment(user_id, amount_ton, progress, tx_key)
+    except Exception:
+        # 'failed': the payer was not credited. 'partial': the payer was,
+        # and a later step (lottery entry, referral commission) was not.
+        status = "partial" if progress["payer_credited"] else "failed"
+        try:
+            await db.ton_payments.set_status(tx_key, status)
+        except Exception as mark_err:
+            print(f"⚠️ Could not mark {tx_key} {status} (the row keeps its last status): "
+                  f"{type(mark_err).__name__}")
+        raise
+    try:
+        await db.ton_payments.set_status(tx_key, "credited")
+    except Exception as e:
+        print(f"⚠️ Payment {tx_key} was credited in full, but 'credited' was not recorded "
+              f"(the row says 'payer_credited'): {type(e).__name__}")
+    return True
+
+
+# Where the poller has read up to. A new key, not the old "last_processed_lt":
+# the old poller advanced that key while crediting nothing (and the TonAPI
+# webhook credited instead), so resuming from it would credit again what the
+# webhook already did. A missing key means: start at the wallet's newest
+# transaction and credit nothing before it.
+TON_POLLER_LT_KEY = "ton_poller_lt_v2"
+# How far back one poll may page (pytoniq fetches 16 per round trip). More new
+# transactions than this between polls is logged as a gap for reconciliation.
+TON_POLL_MAX_TXS = 512
+# On the first anchor, this many of the newest transactions are recorded for
+# reconciliation (see _anchor_poller).
+TON_ANCHOR_LOOKBACK = 64
+# bot_state keys "<prefix><from_lt>:<to_lt>" mark ranges the poller skipped.
+TON_POLLER_GAP_PREFIX = "ton_poller_gap:"
+TON_POLL_INTERVAL = 180
+
+# Set by the signed TonAPI webhook to make the poller look now instead of at
+# its next interval. The webhook only wakes the poller; it credits nothing.
+_payment_poll_wakeup = asyncio.Event()
+
+
+async def _wait_for_poll(seconds: float) -> None:
+    """Wait for the next poll: the interval, or sooner if the webhook fires."""
+    try:
+        await asyncio.wait_for(_payment_poll_wakeup.wait(), timeout=seconds)
+    except asyncio.TimeoutError:
+        pass
+    _payment_poll_wakeup.clear()
+
+
+async def _load_poller_lt():
+    """The stored LT, or None if none is stored. Retries until the read works.
+
+    A failed read must not be mistaken for "no LT": starting from 0 would
+    walk the whole recent history and credit it again.
+    """
+    delay = 5
+    while True:
+        try:
+            value = await db.bot_state.get(TON_POLLER_LT_KEY)
+            return int(value) if value is not None else None
+        except Exception as e:
+            print(f"⚠️ Could not load the poller position, crediting nothing until it loads "
+                  f"(retry in {delay}s): {type(e).__name__}: {e}")
+            await _sleep(delay)
+            delay = min(delay * 2, 300)
+
+
+async def _anchor_poller(client, wallet_address) -> int:
+    """Set the poller's first position: the wallet's newest transaction.
+
+    Nothing at or before it is credited. The anchor comes from the account
+    state, so a wallet with no transactions yet anchors at 0 and its first
+    payment is credited (pytoniq's get_transactions raises IndexError on an
+    empty history). The last TON_ANCHOR_LOOKBACK incoming payments before
+    the anchor are recorded as 'precutover' in ton_payments_processed: the
+    old webhook may or may not have credited them, and the operator checks.
+    """
+    _state, shard_account = await asyncio.wait_for(
+        client.raw_get_account_state(wallet_address), timeout=30)
+    anchor = int(shard_account.last_trans_lt) if shard_account else 0
+    if anchor:
+        recent = await asyncio.wait_for(
+            client.get_transactions(address=wallet_address.to_str(), count=TON_ANCHOR_LOOKBACK),
+            timeout=120)
+        for tx in recent:
+            if tx.lt > anchor:
+                continue  # arrived after the anchor: the next poll credits it
+            try:
+                payment = parse_incoming_payment(tx, wallet_address)
+            except Exception:
+                continue
+            if payment is None:
+                continue
+            amount_nano, memo, _src = payment
+            key = ton_tx_key(wallet_address, tx.lt)
+            await db.ton_payments.record_uncredited(key, amount_nano, memo, "precutover")
+            print(f"📝 Before the anchor, not credited by the poller: lt={tx.lt} "
+                  f"{amount_nano / 1e9} TON memo={memo[:64]!r} (recorded as 'precutover')")
+    await db.bot_state.set(TON_POLLER_LT_KEY, str(anchor))
+    print(f"⚓ Payment poller anchored at LT {anchor}; earlier transactions are not credited")
+    return anchor
+
+
+async def poll_wallet_for_payments():
+    """Background task: credit incoming TON payments, each exactly once."""
+    wallet_address = Address(SERVICE_TON_WALLET)
+    last_processed_lt = await _load_poller_lt()
+    if last_processed_lt is not None:
+        print(f"🔄 Resuming payment polling from LT: {last_processed_lt}")
 
     consecutive_errors = 0
     max_backoff = 300  # Max 5 minutes between retries
-    
+
     # Reuse client to reduce memory churn (only recreate on errors)
     client = None
     client_uses = 0
@@ -788,115 +1160,63 @@ async def poll_wallet_for_payments():
                 await asyncio.wait_for(client.start_up(), timeout=30)
                 client_uses = 0
                 print("🔗 LiteBalancer client (re)initialized")
-            
+
             client_uses += 1
 
-            # Get wallet address
-            wallet_address = Address(SERVICE_TON_WALLET)
+            if last_processed_lt is None:
+                # First run: anchor at the newest transaction, credit nothing.
+                last_processed_lt = await _anchor_poller(client, wallet_address)
+            else:
+                # Everything newer than the stored LT, paging back as far as
+                # TON_POLL_MAX_TXS (to_lt stops the paging at our position).
+                try:
+                    transactions = await asyncio.wait_for(
+                        client.get_transactions(address=wallet_address.to_str(),
+                                                count=TON_POLL_MAX_TXS, to_lt=last_processed_lt),
+                        timeout=120
+                    )
+                except IndexError:
+                    # pytoniq raises IndexError for an account with no
+                    # transactions at all; only possible while anchored at 0.
+                    if last_processed_lt:
+                        raise
+                    transactions = []
+                transactions = [t for t in transactions if t.lt > last_processed_lt]
+                transactions.sort(key=lambda x: x.lt)
 
-            # Get recent transactions with timeout
-            transactions = await asyncio.wait_for(
-                client.get_transactions(address=wallet_address.to_str(), count=10),
-                timeout=30
-            )
+                if len(transactions) >= TON_POLL_MAX_TXS:
+                    oldest = transactions[0]
+                    if getattr(oldest, "prev_trans_lt", 0) > last_processed_lt:
+                        print(f"🚨 More than {TON_POLL_MAX_TXS} transactions since LT {last_processed_lt}: "
+                              f"LT {last_processed_lt}..{oldest.prev_trans_lt} was NOT examined, reconcile by hand")
+                        # Durable, so the range survives a restart and a lost log.
+                        await db.bot_state.set(
+                            f"{TON_POLLER_GAP_PREFIX}{last_processed_lt}:{oldest.prev_trans_lt}",
+                            f"{datetime.utcnow().isoformat()}Z")
 
-            # Sort transactions by LT ascending (oldest first) to process in order
-            transactions.sort(key=lambda x: x.lt)
-
-            new_max_lt = last_processed_lt
-
-            for tx in transactions:
-                # Skip if we've already processed this transaction
-                if tx.lt <= last_processed_lt:
-                    continue
-
-                # Check if this is an incoming transaction
-                if hasattr(tx, 'in_msg') and tx.in_msg:
-                    in_msg = tx.in_msg
-
-                    # Extract amount (in nanotons)
-                    amount_nano = getattr(in_msg, 'value', 0) if hasattr(in_msg, 'value') else 0
-                    amount_ton = amount_nano / 1e9
-
-                    # Extract memo/comment
-                    memo = ""
-                    if hasattr(in_msg, 'body') and in_msg.body:
-                        try:
-                            memo = in_msg.body.decode('utf-8', errors='ignore')
-                        except Exception:
-                            memo = str(in_msg.body)
-
-                    print(f"📥 Incoming payment: {amount_ton} TON, memo: {memo}")
-
-                    # Try to extract user_id from memo
-                    user_id = None
+                for tx in transactions:
+                    # One malformed message, or one failed credit, must not
+                    # stall every payment behind it: once its row is in
+                    # ton_payments_processed ('failed', 'partial' or
+                    # 'claimed'), it is logged and passed. A payment with no
+                    # row yet (the database refused the claim) stops the
+                    # page here, unread, and is read again next poll.
                     try:
-                        match = re.search(r'\d+', memo)
-                        if match:
-                            user_id = int(match.group())
-                    except Exception:
-                        pass
+                        payment = parse_incoming_payment(tx, wallet_address)
+                        if payment is not None:
+                            amount_nano, memo, _src = payment
+                            await process_incoming_payment(ton_tx_key(wallet_address, tx.lt), amount_nano, memo)
+                    except PaymentNotRecorded as e:
+                        print(f"⚠️ Payment at lt={tx.lt} could not be recorded; the poller stays at LT "
+                              f"{last_processed_lt} and reads it again: {e}")
+                        raise
+                    except Exception as e:
+                        print(f"❌ Payment at lt={tx.lt} not processed, needs manual review: {type(e).__name__}: {e}")
 
-                    if user_id:
-                        # Credit referrer with 5% commission
-                        user = await db.users.get(user_id)
-                        if user and user.referred_by:
-                            referrer_id = user.referred_by
-                            commission = amount_ton * 0.05
-                            await db.users.add_referral_earnings(referrer_id, commission)
-                            print(f"💰 Credited {commission:.4f} TON to referrer {referrer_id}")
-
-                        # Check if it's a subscription payment (0.3 TON)
-                        if amount_ton >= 0.28:  # Allow small variance
-                            await add_subscription(user_id, months=1)
-                            print(f"✅ Activated subscription for user {user_id}")
-
-                            # Notify user via both bots
-                            for b in [bot, memeseal_bot]:
-                                if b:
-                                    try:
-                                        await b.send_message(
-                                            user_id,
-                                            "✅ **Subscription Activated!**\n\n"
-                                            "You now have unlimited notarizations for 30 days!\n\n"
-                                            "Send me a file or contract address to seal it! 🔒",
-                                            parse_mode="Markdown"
-                                        )
-                                        break  # Only send once
-                                    except Exception:
-                                        pass
-
-                        # Check if it's a single notarization payment (0.15 TON)
-                        elif amount_ton >= 0.014:  # Allow small variance
-                            # Add to database as paid credit
-                            await db.users.ensure_exists(user_id)
-                            await db.users.add_payment(user_id, amount_ton)
-
-                            print(f"✅ Credited {amount_ton} TON to user {user_id}")
-
-                            # Notify user via both bots
-                            for b in [bot, memeseal_bot]:
-                                if b:
-                                    try:
-                                        await b.send_message(
-                                            user_id,
-                                            "✅ **Payment Received!**\n\n"
-                                            f"You can now notarize one contract.\n\n"
-                                            "Send me a file or contract address! 🔒",
-                                            parse_mode="Markdown"
-                                        )
-                                        break  # Only send once
-                                    except Exception:
-                                        pass
-
-                # Update max LT seen
-                if tx.lt > new_max_lt:
-                    new_max_lt = tx.lt
-
-            # Update DB if we processed new transactions
-            if new_max_lt > last_processed_lt:
-                last_processed_lt = new_max_lt
-                await db.bot_state.set('last_processed_lt', str(last_processed_lt))
+                    # Saved after each transaction, so a crash re-reads at most
+                    # one, and the claim above makes that re-read a no-op.
+                    last_processed_lt = tx.lt
+                    await db.bot_state.set(TON_POLLER_LT_KEY, str(last_processed_lt))
 
             # Success - reset error counter
             consecutive_errors = 0
@@ -918,11 +1238,10 @@ async def poll_wallet_for_payments():
             if "651" in error_msg:
                 print(f"⚠️ Liteserver sync issue (attempt {consecutive_errors}) - will retry")
             elif "lt not in db" in error_msg or "cannot find block" in error_msg:
-                # Stale block reference - reset to start fresh
-                print(f"⚠️ Stale block reference detected - resetting transaction tracking")
-                last_processed_lt = 0
-                await db.bot_state.delete('last_processed_lt')
-                consecutive_errors = 0  # Reset since we fixed the issue
+                # Stale liteserver state: retry with a fresh client. The LT
+                # is kept on purpose. Resetting it to 0 used to replay every
+                # recent payment, which would now credit them again.
+                print(f"⚠️ Stale block reference detected - recreating client")
             else:
                 print(f"❌ Error polling wallet (attempt {consecutive_errors}): {error_msg}")
             # Force client recreation on error
@@ -937,9 +1256,9 @@ async def poll_wallet_for_payments():
         if consecutive_errors > 0:
             backoff = min(30 * (2 ** (consecutive_errors - 1)), max_backoff)
             print(f"🔄 Retrying in {backoff}s...")
-            await asyncio.sleep(backoff)
+            await _sleep(backoff)
         else:
-            await asyncio.sleep(180)  # Normal poll interval (3 min to reduce memory churn)
+            await _wait_for_poll(TON_POLL_INTERVAL)
 
 # ========================
 # BOT HANDLERS
@@ -1049,7 +1368,7 @@ async def process_ton_subscription(callback: types.CallbackQuery):
         f"**Step 3:** Add this memo:\n"
         f"`{user_id}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"⏱️ Activates in ~1 minute after sending\n"
+        f"⏱️ Activates within about 3 minutes after sending\n"
         f"✅ We'll notify you when confirmed!",
         parse_mode="Markdown"
     )
@@ -1091,7 +1410,7 @@ async def process_ton_single(callback: types.CallbackQuery):
         f"**Step 3:** Add this memo:\n"
         f"`{user_id}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"⏱️ Credit added in ~1 minute\n"
+        f"⏱️ Credit added within about 3 minutes\n"
         f"📤 Then send your file to seal it!",
         parse_mode="Markdown"
     )
@@ -1177,11 +1496,61 @@ async def process_inline_query(inline_query: InlineQuery):
 # TELEGRAM STARS PAYMENT HANDLERS
 # ========================
 
+async def answer_pre_checkout(pre_checkout_query: PreCheckoutQuery):
+    """Approve a Stars payment, except chips while the casino is off.
+
+    A chip invoice made before CASINO_ENABLED was turned off can still be
+    paid; the chips could not be used and there is no refund path, so the
+    payment is declined before any Stars move.
+    """
+    payload = pre_checkout_query.invoice_payload or ""
+    if payload.startswith("casino_chips_") and not CASINO_ENABLED:
+        user_id = pre_checkout_query.from_user.id
+        await pre_checkout_query.answer(
+            ok=False, error_message=await localized(user_id, "casino_paused_checkout"))
+        return
+    await pre_checkout_query.answer(ok=True)
+
+
 @dp.pre_checkout_query()
 async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
     """Handle pre-checkout query - must respond within 10 seconds"""
-    # Always approve - Stars payments are instant and reliable
-    await pre_checkout_query.answer(ok=True)
+    await answer_pre_checkout(pre_checkout_query)
+
+
+async def credit_casino_chips(message: types.Message, user_id: int, chips_amount: int):
+    """Credit chips bought with Stars (1 Star = 1 chip), from either bot.
+
+    Chip invoices are issued by MemeSeal when it is configured, so both bots'
+    successful_payment handlers come here.
+    """
+    await db.users.ensure_exists(user_id)
+    new_balance = await db.casino.add_chips(user_id, chips_amount)
+
+    # Bonus chips for larger purchases (Patrick Collison: price anchoring)
+    bonus = 0
+    if chips_amount >= 500:
+        bonus = chips_amount // 5  # 20% bonus
+        new_balance = await db.casino.add_chips(user_id, bonus)
+    elif chips_amount >= 100:
+        bonus = chips_amount // 10  # 10% bonus
+        new_balance = await db.casino.add_chips(user_id, bonus)
+
+    bonus_msg = f"\n🎁 **BONUS:** +{bonus} chips!" if bonus > 0 else ""
+
+    await message.answer(
+        f"🎰💰 **CHIPS LOADED!**\n\n"
+        f"✅ **+{chips_amount} chips** added{bonus_msg}\n"
+        f"💎 **New Balance:** {new_balance} chips\n\n"
+        f"🐸 **LET'S GO DEGEN!**\n\n"
+        f"Open the casino to play:\n"
+        f"• 🎰 Politician Slots (100x jackpot)\n"
+        f"• 🚀 Frog Rocket (crash game)\n"
+        f"• 🎯 Election Roulette\n\n"
+        f"20% of all bets feed the lottery pot! 🎫",
+        parse_mode="Markdown"
+    )
+    print(f"🎰 Casino chips purchased: {chips_amount} chips for user {user_id}")
 
 
 @dp.message(F.successful_payment)
@@ -1237,39 +1606,8 @@ async def process_successful_payment(message: types.Message):
         )
 
     elif payload.startswith("casino_chips_"):
-        # 🎰💰 CASINO CHIPS PURCHASE - THE MONEY MAKER
-        # Payload format: casino_chips_{user_id}_{amount}_{timestamp}
-        parts = payload.split("_")
-        chips_amount = payment.total_amount  # 1 Star = 1 Chip
-        
-        # Add chips to user's casino balance
-        await db.users.ensure_exists(user_id)
-        new_balance = await db.casino.add_chips(user_id, chips_amount)
-        
-        # Bonus chips for larger purchases (Patrick Collison: price anchoring)
-        bonus = 0
-        if chips_amount >= 500:
-            bonus = chips_amount // 5  # 20% bonus
-            new_balance = await db.casino.add_chips(user_id, bonus)
-        elif chips_amount >= 100:
-            bonus = chips_amount // 10  # 10% bonus
-            new_balance = await db.casino.add_chips(user_id, bonus)
-        
-        bonus_msg = f"\n🎁 **BONUS:** +{bonus} chips!" if bonus > 0 else ""
-        
-        await message.answer(
-            f"🎰💰 **CHIPS LOADED!**\n\n"
-            f"✅ **+{chips_amount} chips** added{bonus_msg}\n"
-            f"💎 **New Balance:** {new_balance} chips\n\n"
-            f"🐸 **LET'S GO DEGEN!**\n\n"
-            f"Open the casino to play:\n"
-            f"• 🎰 Politician Slots (100x jackpot)\n"
-            f"• 🚀 Frog Rocket (crash game)\n"
-            f"• 🎯 Election Roulette\n\n"
-            f"20% of all bets feed the lottery pot! 🎫",
-            parse_mode="Markdown"
-        )
-        print(f"🎰 Casino chips purchased: {chips_amount} chips for user {user_id}")
+        # 🎰💰 CASINO CHIPS PURCHASE: 1 Star = 1 chip
+        await credit_casino_chips(message, user_id, payment.total_amount)
 
 
 @dp.message(Command("status"))
@@ -1431,6 +1769,18 @@ def get_countdown_to_draw() -> str:
         return f"{minutes}m"
 
 
+async def lottery_win_chance(user_id: int) -> float:
+    """The user's chance in the next draw, in percent.
+
+    The draw is weighted by the stars behind each entry (pick_winner), so
+    this is the user's stars over all stars, not a count of rows.
+    """
+    total = await db.lottery.get_entry_stars()
+    if total <= 0:
+        return 0.0
+    return await db.lottery.get_entry_stars(user_id) / total * 100
+
+
 @dp.message(Command("pot"))
 async def cmd_pot(message: types.Message):
     """Show current lottery pot - DEGEN MODE 🎰 (Agent 8: Enhanced)"""
@@ -1445,7 +1795,7 @@ async def cmd_pot(message: types.Message):
 
     # Calculate user's odds
     if total_entries > 0 and user_tickets > 0:
-        win_chance = (user_tickets / total_entries) * 100
+        win_chance = await lottery_win_chance(user_id)
         odds_msg = f"🎯 **Your odds:** {win_chance:.2f}% ({user_tickets} tickets)"
     elif user_tickets == 0:
         odds_msg = "🎯 **Your odds:** 0% (no tickets yet!)"
@@ -1495,10 +1845,7 @@ async def cmd_mytickets(message: types.Message):
     unique_players = await db.lottery.get_unique_participants()
     countdown = get_countdown_to_draw()
 
-    if total_entries > 0:
-        win_chance = (ticket_count / total_entries) * 100
-    else:
-        win_chance = 0
+    win_chance = await lottery_win_chance(user_id)
 
     next_draw = get_next_draw_date()
 
@@ -1555,6 +1902,14 @@ async def cmd_withdraw(message: types.Message):
     user_id = message.from_user.id
     args = message.text.split()[1:] if len(message.text.split()) > 1 else []
 
+    # Sending TON to a wallet the user names is a transfer at the user's
+    # request: off unless WITHDRAWALS_ENABLED. Checked first, so a paused
+    # /withdraw changes nothing, the saved wallet included (the lottery
+    # auto-payout would otherwise pay whatever address was last registered).
+    if not WITHDRAWALS_ENABLED:
+        await message.answer(await localized(user_id, "withdraw_paused"), parse_mode="Markdown")
+        return
+
     # Get user's available balance
     user = await db.users.get(user_id)
     if not user:
@@ -1603,32 +1958,44 @@ async def cmd_withdraw(message: types.Message):
         )
         return
 
-    # Process withdrawal
+    # Record the withdrawal before sending. The old order (send, then record)
+    # let two concurrent commands both read the same balance and both pay it.
+    # reserve_withdrawal debits under a row lock, so the second one gets 0.
+    amount = await db.users.reserve_withdrawal(user_id, MIN_WITHDRAWAL_TON)
+    if amount <= 0:
+        await message.answer(
+            f"⚠️ **Minimum Withdrawal: {MIN_WITHDRAWAL_TON} TON**\n\n"
+            f"Your balance: {0:.4f} TON\n\n"
+            f"Keep sharing your /referral link to earn more!",
+            parse_mode="Markdown"
+        )
+        return
+
     try:
         await send_payout_transaction(
             destination=wallet_address,
-            amount_ton=available,
+            amount_ton=amount,
             memo=f"NotaryTON Referral Payout"
         )
-
-        # Update DB
-        await db.users.record_withdrawal(user_id, available)
-
-        await message.answer(
-            f"✅ **Withdrawal Sent!**\n\n"
-            f"**Amount:** {available:.4f} TON\n"
-            f"**To:** `{wallet_address[:20]}...`\n\n"
-            f"TX will appear in ~30 seconds.\n"
-            f"Check: tonscan.org/address/{wallet_address}",
-            parse_mode="Markdown"
-        )
     except Exception as e:
+        # The send may have reached the chain before it raised, so the amount
+        # stays reserved and an operator reconciles it; refunding here could
+        # pay twice. The user sees no exception text.
+        print(f"❌ Withdrawal of {amount:.4f} TON for user {user_id} failed, held for review: {type(e).__name__}: {e}")
         await message.answer(
-            f"❌ **Withdrawal Failed**\n\n"
-            f"Error: {str(e)}\n\n"
-            f"Please try again later or contact support.",
+            await localized(user_id, "withdraw_failed", amount=f"{amount:.4f}"),
             parse_mode="Markdown"
         )
+        return
+
+    await message.answer(
+        f"✅ **Withdrawal Sent!**\n\n"
+        f"**Amount:** {amount:.4f} TON\n"
+        f"**To:** `{wallet_address[:20]}...`\n\n"
+        f"TX will appear in ~30 seconds.\n"
+        f"Check: tonscan.org/address/{wallet_address}",
+        parse_mode="Markdown"
+    )
 
 @dp.message(Command("lang"))
 async def cmd_lang(message: types.Message):
@@ -1671,33 +2038,14 @@ async def process_lang_change(callback: types.CallbackQuery):
 async def cmd_api(message: types.Message):
     user_id = message.from_user.id
     has_sub = await get_user_subscription(user_id)
-    
+
     if not has_sub:
-        await message.answer(
-            "⚠️ **API Access Requires Subscription**\n\n"
-            "Subscribe first with /subscribe to get API access!",
-            parse_mode="Markdown"
-        )
+        await message.answer(await localized(user_id, "api_requires_sub"), parse_mode="Markdown")
         return
-    
+
+    key = await issue_api_key(user_id)
     await message.answer(
-        f"🔌 **NotaryTON API**\n\n"
-        f"**Your API Key:** `{user_id}`\n\n"
-        f"**Endpoints:**\n"
-        f"• POST {WEBHOOK_URL}/api/v1/notarize\n"
-        f"• POST {WEBHOOK_URL}/api/v1/batch\n"
-        f"• GET {WEBHOOK_URL}/api/v1/verify/{{hash}}\n\n"
-        f"**Example:**\n"
-        f"```bash\n"
-        f"curl -X POST {WEBHOOK_URL}/api/v1/notarize \\\n"
-        f"  -H 'Content-Type: application/json' \\\n"
-        f"  -d '{{\n"
-        f"    \"api_key\": \"{user_id}\",\n"
-        f"    \"contract_address\": \"EQ...\",\n"
-        f"    \"metadata\": {{\"project_name\": \"MyCoin\"}}\n"
-        f"  }}'\n"
-        f"```\n\n"
-        f"📚 Full docs: {WEBHOOK_URL}/docs",
+        await localized(user_id, "api_key_issued", key=key, url=WEBHOOK_URL),
         parse_mode="Markdown"
     )
 
@@ -1753,9 +2101,29 @@ async def check_user_can_notarize(user_id: int):
     return False, False
 
 
-async def deduct_credit(user_id: int):
-    """Deduct one notarization credit from user"""
-    await db.users.deduct_payment(user_id, TON_SINGLE_SEAL)
+async def deduct_credit(user_id: int) -> bool:
+    """Take one seal's credit before the seal is sent. True if it was taken.
+
+    One conditional UPDATE: check_user_can_notarize is only a read, and
+    concurrent updates (an album, parallel webhook delivery) all pass it,
+    so the debit itself is the check. One credit pays for one seal.
+    """
+    return await db.users.deduct_payment(user_id, TON_SINGLE_SEAL)
+
+
+async def take_seal_payment(user_id: int, has_sub: bool) -> bool:
+    """Pay for one seal now: free for a subscriber, else one credit, atomically."""
+    return has_sub or await deduct_credit(user_id)
+
+
+async def give_back_seal_payment(user_id: int, has_sub: bool) -> None:
+    """A seal that was paid for and not sent gives its credit back."""
+    if has_sub:
+        return
+    try:
+        await db.users.add_payment(user_id, TON_SINGLE_SEAL)
+    except Exception as e:
+        print(f"⚠️ Could not give back a seal credit to {user_id}, needs manual review: {type(e).__name__}")
 
 
 def get_payment_keyboard():
@@ -1854,12 +2222,25 @@ async def handle_text_message(message: types.Message):
             )
         return
 
+    # Paid before the seal is sent, given back if it is not.
+    if not await take_seal_payment(user_id, has_sub):
+        await message.reply(
+            "⚠️ **Payment Required**\n\n"
+            f"Contract detected: `{contract_id[:20]}...`\n\n"
+            "Choose how to pay:",
+            parse_mode="Markdown",
+            reply_markup=get_payment_keyboard()
+        )
+        return
+
     # Notarize the contract
+    sent = False
     try:
         await message.reply("⏳ Fetching contract and sealing on TON...")
 
         contract_code = await get_contract_code_from_tx(contract_id)
         if not contract_code:
+            await give_back_seal_payment(user_id, has_sub)
             await message.reply(
                 "❌ **Could not fetch contract**\n\n"
                 "Make sure the address is valid and the contract is deployed.",
@@ -1870,11 +2251,8 @@ async def handle_text_message(message: types.Message):
         contract_hash = hash_data(contract_code)
         comment = f"NotaryTON:Contract:{contract_hash[:16]}"
         await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
+        sent = True
         await log_notarization(user_id, contract_id, contract_hash, paid=True)
-
-        # Deduct credit if not subscription
-        if not has_sub:
-            await deduct_credit(user_id)
 
         await message.reply(
             f"✅ **SEALED!**\n\n"
@@ -1885,6 +2263,8 @@ async def handle_text_message(message: types.Message):
             parse_mode="Markdown"
         )
     except Exception as e:
+        if not sent:
+            await give_back_seal_payment(user_id, has_sub)
         await message.reply(f"❌ Error notarizing: {str(e)}")
 
 @dp.message(F.document)
@@ -1905,24 +2285,33 @@ async def handle_document(message: types.Message):
         )
         return
 
-    # Download file
-    file_id = message.document.file_id
-    file = await bot.get_file(file_id)
-    file_path = f"downloads/{file_id}"
-    os.makedirs("downloads", exist_ok=True)
-    await bot.download_file(file.file_path, file_path)
+    # Paid before the seal is sent, given back if it is not.
+    if not await take_seal_payment(user_id, has_sub):
+        await message.answer(
+            "⚠️ **Payment Required to Notarize**\n\n"
+            "Choose how to pay:",
+            parse_mode="Markdown",
+            reply_markup=get_payment_keyboard()
+        )
+        return
 
-    # Hash it
-    file_hash = hash_file(file_path)
-    comment = f"NotaryTON:File:{file_hash[:16]}"
-
+    file_path = None
+    sent = False
     try:
-        await send_ton_transaction(comment)
-        await log_notarization(user_id, "manual_file", file_hash, paid=True)
+        # Download file
+        file_id = message.document.file_id
+        file = await bot.get_file(file_id)
+        file_path = f"downloads/{file_id}"
+        os.makedirs("downloads", exist_ok=True)
+        await bot.download_file(file.file_path, file_path)
 
-        # Deduct credit if not subscription
-        if not has_sub:
-            await deduct_credit(user_id)
+        # Hash it
+        file_hash = hash_file(file_path)
+        comment = f"NotaryTON:File:{file_hash[:16]}"
+
+        await send_ton_transaction(comment)
+        sent = True
+        await log_notarization(user_id, "manual_file", file_hash, paid=True)
 
         await message.answer(
             f"✅ **SEALED!**\n\n"
@@ -1933,11 +2322,14 @@ async def handle_document(message: types.Message):
             parse_mode="Markdown"
         )
     except Exception as e:
+        if not sent:
+            await give_back_seal_payment(user_id, has_sub)
         await message.answer(f"❌ Error: {str(e)}")
 
     # Clean up
     try:
-        os.remove(file_path)
+        if file_path:
+            os.remove(file_path)
     except Exception:
         pass
 
@@ -1958,22 +2350,33 @@ async def handle_photo(message: types.Message):
         )
         return
 
-    # Download largest photo
-    photo = message.photo[-1]
-    file = await bot.get_file(photo.file_id)
-    file_path = f"downloads/{photo.file_id}.jpg"
-    os.makedirs("downloads", exist_ok=True)
-    await bot.download_file(file.file_path, file_path)
+    # Paid before the seal is sent, given back if it is not.
+    if not await take_seal_payment(user_id, has_sub):
+        await message.answer(
+            "📸 **Nice screenshot!**\n\n"
+            "3 Stars to seal it on TON forever.\n"
+            "Proof you were there. 🔐",
+            parse_mode="Markdown",
+            reply_markup=get_payment_keyboard()
+        )
+        return
 
-    file_hash = hash_file(file_path)
-    comment = f"NotaryTON:Screenshot:{file_hash[:12]}"
-
+    file_path = None
+    sent = False
     try:
-        await send_ton_transaction(comment)
-        await log_notarization(user_id, "screenshot", file_hash, paid=True)
+        # Download largest photo
+        photo = message.photo[-1]
+        file = await bot.get_file(photo.file_id)
+        file_path = f"downloads/{photo.file_id}.jpg"
+        os.makedirs("downloads", exist_ok=True)
+        await bot.download_file(file.file_path, file_path)
 
-        if not has_sub:
-            await deduct_credit(user_id)
+        file_hash = hash_file(file_path)
+        comment = f"NotaryTON:Screenshot:{file_hash[:12]}"
+
+        await send_ton_transaction(comment)
+        sent = True
+        await log_notarization(user_id, "screenshot", file_hash, paid=True)
 
         await message.answer(
             f"✅ **SCREENSHOT SEALED!**\n\n"
@@ -1983,10 +2386,13 @@ async def handle_photo(message: types.Message):
             parse_mode="Markdown"
         )
     except Exception as e:
+        if not sent:
+            await give_back_seal_payment(user_id, has_sub)
         await message.answer(f"❌ Error: {str(e)}")
 
     try:
-        os.remove(file_path)
+        if file_path:
+            os.remove(file_path)
     except Exception:
         pass
 
@@ -1994,6 +2400,281 @@ async def handle_photo(message: types.Message):
 # ========================
 # MEMESEAL TON HANDLERS (Degen branding)
 # ========================
+
+# MemeSeal callbacks that decide whether a seal is paid for. Module level (and
+# registered inside the block below) so tests can drive them without a
+# MemeSeal token. background_seal_ton / background_seal_stars are defined in
+# that block and looked up when a callback runs.
+
+async def memeseal_ton_single(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+
+    # Taken out synchronously, so two taps cannot both seal the same file.
+    file_info = pending_files.pop(user_id, None)
+    if file_info is None:
+        await callback.answer()
+        can_notarize, _has_sub = await check_user_can_notarize(user_id)
+        if can_notarize:
+            # The file expired while the payment was being credited: the
+            # credit is there, so ask for the file, not for another payment.
+            await callback.message.answer(
+                await localized(user_id, "ton_credit_send_file"), parse_mode="Markdown")
+            return
+        await callback.message.answer(
+            f"💎 **Pay with TON**\n\n"
+            f"Send **0.15 TON** to:\n"
+            f"`{SERVICE_TON_WALLET}`\n\n"
+            f"**Memo:** `{user_id}`\n\n"
+            f"Then send your file - I'll seal it instantly! 🐸⚡",
+            parse_mode="Markdown"
+        )
+        return
+
+    if file_info.get("paid"):
+        # Already paid (a Stars seal that failed): seal it, charge nothing,
+        # and keep the payment on the file if this attempt fails too.
+        await callback.answer()
+        await _seal_paid_file(user_id, file_info, callback.message.answer)
+        return
+
+    # Seal only against a credited payment, taken in one conditional debit
+    # before the seal. This button used to seal straight away with no
+    # payment at all, and every seal costs the service wallet fees. A TON
+    # payment is credited by the poller.
+    can_notarize, has_sub = await check_user_can_notarize(user_id)
+    if not (can_notarize and await take_seal_payment(user_id, has_sub)):
+        # Kept for the next tap, with a fresh timestamp: the payment can take
+        # minutes to be credited, and the file must outlive that.
+        already_asked = file_info.get("ton_payment_asked", False)
+        file_info["ton_payment_asked"] = True
+        file_info["timestamp"] = time.time()
+        pending_files[user_id] = file_info
+        if already_asked:
+            # The instructions were shown already: a short "not yet", not
+            # the whole payment request again.
+            await callback.answer(await localized(user_id, "ton_not_credited_yet"), show_alert=True)
+            return
+        await callback.answer()
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text=await localized(user_id, "ton_paid_button"),
+                                        callback_data="ms_pay_ton_single")],
+        ])
+        await callback.message.answer(
+            await localized(user_id, "ton_seal_need_payment", price=f"{TON_SINGLE_SEAL}",
+                            wallet=SERVICE_TON_WALLET, memo=user_id),
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        return
+
+    await callback.answer()
+    file_info.pop("ton_payment_asked", None)
+    file_info["paid"] = True
+    file_info["charged_credit"] = not has_sub
+
+    # ✅ HONEST PROGRESS - show real status, no fake success
+    progress_msg = await callback.message.answer(
+        f"⏳ **SEALING TO BLOCKCHAIN...**\n\n"
+        f"Your file is being timestamped on TON.\n"
+        f"This takes 5-15 seconds.\n\n"
+        f"_Please wait..._",
+        parse_mode="Markdown"
+    )
+
+    # 🔥 BACKGROUND SEAL - do the actual work
+    _spawn(background_seal_ton(
+        user_id=user_id,
+        file_info=file_info,
+        message_to_edit=progress_msg
+    ))
+
+
+async def _seal_paid_file(user_id: int, file_info: dict, send) -> None:
+    """Seal a file whose payment already went through, charging nothing.
+
+    background_seal_stars keeps the file's paid flag when the seal fails,
+    so a later retry still seals it for free.
+    """
+    progress_msg = await send(
+        f"⏳ **RETRYING...**\n\n"
+        f"Sealing to blockchain.\n"
+        f"This takes 5-15 seconds.\n\n"
+        f"_Please wait..._",
+        parse_mode="Markdown"
+    )
+    ticket_count = await db.lottery.count_user_entries(user_id)
+    _spawn(background_seal_stars(
+        user_id=user_id,
+        file_info=file_info,
+        message_to_edit=progress_msg,
+        ticket_count=ticket_count
+    ))
+
+
+async def memeseal_retry_seal(callback: types.CallbackQuery):
+    """Handle retry button for failed seals"""
+    user_id = callback.from_user.id
+    await callback.answer("🔄 Retrying...")
+
+    file_info = pending_files.pop(user_id, None)
+    if file_info is None:
+        await callback.message.edit_text(
+            "⚠️ **Session Expired**\n\n"
+            "Please send your file again to seal it.",
+            parse_mode="Markdown"
+        )
+        return
+
+    # pending_files also holds files nobody has paid for yet (a file sent
+    # without credit waits there for payment). A retry seals only a file
+    # whose payment went through, or one a credit now covers.
+    if not file_info.get("paid"):
+        can_notarize, has_sub = await check_user_can_notarize(user_id)
+        if not (can_notarize and await take_seal_payment(user_id, has_sub)):
+            pending_files[user_id] = file_info
+            await callback.message.answer(
+                await localized(user_id, "seal_retry_unpaid"),
+                parse_mode="Markdown",
+                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
+                    [types.InlineKeyboardButton(text="⭐ Pay 3 Stars & Seal Now", callback_data="ms_pay_stars_single")],
+                    [types.InlineKeyboardButton(text="💎 Pay 0.15 TON instead", callback_data="ms_pay_ton_single")],
+                ])
+            )
+            return
+        file_info["paid"] = True
+
+    # Show progress
+    progress_msg = await callback.message.edit_text(
+        f"⏳ **RETRYING...**\n\n"
+        f"Sealing to blockchain.\n"
+        f"This takes 5-15 seconds.\n\n"
+        f"_Please wait..._",
+        parse_mode="Markdown"
+    )
+
+    # Retry in background
+    ticket_count = await db.lottery.count_user_entries(user_id)
+    _spawn(background_seal_stars(
+        user_id=user_id,
+        file_info=file_info,
+        message_to_edit=progress_msg,
+        ticket_count=ticket_count
+    ))
+
+
+async def memeseal_payment_success(message: types.Message):
+    """MemeSeal's successful Stars payment: chips, a subscription, or one seal."""
+    user_id = message.from_user.id
+    payment = message.successful_payment
+    payload = payment.invoice_payload
+
+    if payload.startswith("casino_chips_"):
+        # Chip invoices come from this bot (api_casino_buy_chips): the
+        # Stars buy chips, not a seal credit. Wagers make lottery entries.
+        await credit_casino_chips(message, user_id, payment.total_amount)
+        return
+
+    # 🎰 LOTTERY: Add entry for EVERY payment
+    await db.users.ensure_exists(user_id)
+    await db.lottery.add_entry(user_id, amount_stars=payment.total_amount)
+    ticket_count = await db.lottery.count_user_entries(user_id)
+
+    if "sub" in payload:
+        await add_subscription(user_id, months=1)
+        await message.answer(
+            "🚨 **UNLIMITED MODE ACTIVATED** 🟢\n\n"
+            "⚡ 30 days of infinite seals unlocked!\n\n"
+            f"🎰 **+{payment.total_amount} LOTTERY TICKETS!**\n"
+            f"Total tickets: {ticket_count}\n\n"
+            "Send me ANYTHING - I'll seal it all.\n"
+            "Files, screenshots, contracts, memes.\n\n"
+            "**You're in the club now.** 🐸🚀",
+            parse_mode="Markdown"
+        )
+    else:
+        # ✅ HONEST PROGRESS - check if we have pending file to seal
+        if user_id in pending_files:
+            file_info = pending_files[user_id]
+            del pending_files[user_id]
+
+            # Show honest progress message
+            progress_msg = await message.answer(
+                f"✅ **PAYMENT RECEIVED!** 🟢\n\n"
+                f"1 ⭐ confirmed — now sealing to blockchain...\n\n"
+                f"⏳ This takes 5-15 seconds.\n"
+                f"🎰 Lottery tickets: {ticket_count}\n\n"
+                f"_Please wait..._",
+                parse_mode="Markdown"
+            )
+
+            # Seal in background
+            _spawn(background_seal_stars(
+                user_id=user_id,
+                file_info=file_info,
+                message_to_edit=progress_msg,
+                ticket_count=ticket_count
+            ))
+        else:
+            await db.users.add_payment(user_id, TON_SINGLE_SEAL)
+            await message.answer(
+                "🚨 **PAYMENT CONFIRMED** 🟢\n\n"
+                "1 ⭐ Star received!\n\n"
+                "Now send me what you want sealed.\n"
+                "File, screenshot, whatever.\n\n"
+                f"🎰 **+1 LOTTERY TICKET!** ({ticket_count} total)\n"
+                "🐸⚡",
+                parse_mode="Markdown"
+            )
+
+
+async def memeseal_api(message: types.Message):
+    """MemeSeal's /api: a key for subscribers, and everyone's referral link.
+
+    MemeSeal has no /referral command, so this is where its users find the
+    link. It points at NotaryTON, whose /start records the referrer;
+    MemeSeal's /start reads its argument as a promo code and records none.
+    """
+    user_id = message.from_user.id
+    referral = await localized(user_id, "referral_link_line",
+                               url=f"https://t.me/{BOT_USERNAME}?start=REF{user_id}")
+    if not await get_user_subscription(user_id):
+        await message.answer(
+            await localized(user_id, "api_requires_sub") + "\n\n" + referral, parse_mode="Markdown")
+        return
+    key = await issue_api_key(user_id)
+    await message.answer(
+        await localized(user_id, "api_key_issued", key=key, url=WEBHOOK_URL) + "\n\n" + referral,
+        parse_mode="Markdown"
+    )
+
+
+async def memeseal_casino(message: types.Message):
+    """Open the casino mini app"""
+    if not CASINO_ENABLED:
+        await message.answer(await localized(message.from_user.id, "casino_paused"), parse_mode="Markdown")
+        return
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(
+            text="🎰 OPEN CASINO",
+            web_app=WebAppInfo(url="https://casino.notaryton.com")
+        )]
+    ])
+
+    await message.answer(
+        "🎰🐸 **MEMESEAL CASINO**\n\n"
+        "**GAMES:**\n"
+        "• 🎰 Politician Slots (100x jackpot)\n"
+        "• 🚀 Frog Rocket (crash game)\n"
+        "• 🎯 Election Roulette\n\n"
+        "**THE DEAL:**\n"
+        "• 20% of ALL bets feed the lottery pot\n"
+        "• Connect TON wallet to play\n"
+        "• Win big or feed the frogs\n\n"
+        "Tap below to enter the casino 👇",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
 
 if memeseal_dp:
     @memeseal_dp.message(Command("start"))
@@ -2035,15 +2716,19 @@ if memeseal_dp:
             f"{free_seal_msg}"
         )
 
-        # Add helpful buttons
-        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(
+        # Add helpful buttons. The casino button only while the casino API
+        # is on: with it off every call the Mini App makes answers 503.
+        buttons = []
+        if CASINO_ENABLED:
+            buttons.append([types.InlineKeyboardButton(
                 text="🎰 PLAY CASINO",
                 web_app=WebAppInfo(url="https://casino.notaryton.com")
-            )],
+            )])
+        buttons += [
             [types.InlineKeyboardButton(text="💰 Check Lottery Pot", callback_data="ms_check_pot")],
             [types.InlineKeyboardButton(text="🚀 Go Unlimited (20 ⭐/mo)", callback_data="ms_pay_stars_sub")]
-        ])
+        ]
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons)
 
         await message.answer(welcome_msg, parse_mode="Markdown", reply_markup=keyboard)
 
@@ -2136,47 +2821,26 @@ if memeseal_dp:
             provider_token="",
         )
 
-    @memeseal_dp.callback_query(F.data == "ms_pay_ton_single")
-    async def memeseal_ton_single(callback: types.CallbackQuery):
-        user_id = callback.from_user.id
-        await callback.answer()
+    memeseal_dp.callback_query(F.data == "ms_pay_ton_single")(memeseal_ton_single)
 
-        # 🐸 INSTANT DOPAMINE - show success immediately, seal in background
-        if user_id not in pending_files:
-            await callback.message.answer(
-                f"💎 **Pay with TON**\n\n"
-                f"Send **0.15 TON** to:\n"
-                f"`{SERVICE_TON_WALLET}`\n\n"
-                f"**Memo:** `{user_id}`\n\n"
-                f"Then send your file - I'll seal it instantly! 🐸⚡",
-                parse_mode="Markdown"
-            )
-            return
+    async def _give_back_ton_seal_credit(user_id: int, file_info: dict):
+        """A seal that did not happen gives its credit back.
 
-        file_info = pending_files[user_id]
-        del pending_files[user_id]
-
-        # ✅ HONEST PROGRESS - show real status, no fake success
-        progress_msg = await callback.message.answer(
-            f"⏳ **SEALING TO BLOCKCHAIN...**\n\n"
-            f"Your file is being timestamped on TON.\n"
-            f"This takes 5-15 seconds.\n\n"
-            f"_Please wait..._",
-            parse_mode="Markdown"
-        )
-
-        # 🔥 BACKGROUND SEAL - do the actual work
-        asyncio.create_task(background_seal_ton(
-            user_id=user_id,
-            file_info=file_info,
-            message_to_edit=progress_msg
-        ))
-
+        The file is then unpaid again, so "Try Again" checks for a credit
+        once more instead of sealing for free.
+        """
+        if file_info.pop("charged_credit", False):
+            try:
+                await db.users.add_payment(user_id, TON_SINGLE_SEAL)
+            except Exception as e:
+                print(f"⚠️ Could not give back a seal credit to {user_id}, needs manual review: {type(e).__name__}")
+        file_info["paid"] = False
 
     async def background_seal_ton(user_id: int, file_info: dict, message_to_edit):
         """Background task to seal file and update message with real link"""
         file_hash = None
         file_path = None
+        sealed = False
 
         try:
             # Download file
@@ -2221,7 +2885,8 @@ if memeseal_dp:
 
             if sealed:
                 await log_notarization(user_id, "memeseal_ton_instant", file_hash, paid=True)
-                await db.lottery.add_entry(user_id, amount_stars=1)
+                # The TON payment that bought this credit already earned its
+                # ticket when the poller credited it.
                 ticket_count = await db.lottery.count_user_entries(user_id)
 
                 # ✅ UPDATE MESSAGE WITH REAL LINK
@@ -2253,10 +2918,13 @@ if memeseal_dp:
                     reply_markup=retry_keyboard
                 )
                 # Store file for retry
+                await _give_back_ton_seal_credit(user_id, file_info)
                 pending_files[user_id] = file_info
 
         except Exception as e:
             print(f"❌ Background seal error: {e}")
+            if not sealed:
+                await _give_back_ton_seal_credit(user_id, file_info)
             # Agent 9: ALWAYS notify user of failures
             retry_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [types.InlineKeyboardButton(text="🔄 Try Again", callback_data="ms_retry_seal")],
@@ -2281,68 +2949,9 @@ if memeseal_dp:
                 except:
                     pass
 
-    @memeseal_dp.pre_checkout_query()
-    async def memeseal_pre_checkout(pre_checkout_query: PreCheckoutQuery):
-        await pre_checkout_query.answer(ok=True)
+    memeseal_dp.pre_checkout_query()(answer_pre_checkout)
 
-    @memeseal_dp.message(F.successful_payment)
-    async def memeseal_payment_success(message: types.Message):
-        user_id = message.from_user.id
-        payment = message.successful_payment
-        payload = payment.invoice_payload
-
-        # 🎰 LOTTERY: Add entry for EVERY payment
-        await db.users.ensure_exists(user_id)
-        await db.lottery.add_entry(user_id, amount_stars=payment.total_amount)
-        ticket_count = await db.lottery.count_user_entries(user_id)
-
-        if "sub" in payload:
-            await add_subscription(user_id, months=1)
-            await message.answer(
-                "🚨 **UNLIMITED MODE ACTIVATED** 🟢\n\n"
-                "⚡ 30 days of infinite seals unlocked!\n\n"
-                f"🎰 **+{payment.total_amount} LOTTERY TICKETS!**\n"
-                f"Total tickets: {ticket_count}\n\n"
-                "Send me ANYTHING - I'll seal it all.\n"
-                "Files, screenshots, contracts, memes.\n\n"
-                "**You're in the club now.** 🐸🚀",
-                parse_mode="Markdown"
-            )
-        else:
-            # ✅ HONEST PROGRESS - check if we have pending file to seal
-            if user_id in pending_files:
-                file_info = pending_files[user_id]
-                del pending_files[user_id]
-
-                # Show honest progress message
-                progress_msg = await message.answer(
-                    f"✅ **PAYMENT RECEIVED!** 🟢\n\n"
-                    f"1 ⭐ confirmed — now sealing to blockchain...\n\n"
-                    f"⏳ This takes 5-15 seconds.\n"
-                    f"🎰 Lottery tickets: {ticket_count}\n\n"
-                    f"_Please wait..._",
-                    parse_mode="Markdown"
-                )
-
-                # Seal in background
-                asyncio.create_task(background_seal_stars(
-                    user_id=user_id,
-                    file_info=file_info,
-                    message_to_edit=progress_msg,
-                    ticket_count=ticket_count
-                ))
-            else:
-                await db.users.add_payment(user_id, TON_SINGLE_SEAL)
-                await message.answer(
-                    "🚨 **PAYMENT CONFIRMED** 🟢\n\n"
-                    "1 ⭐ Star received!\n\n"
-                    "Now send me what you want sealed.\n"
-                    "File, screenshot, whatever.\n\n"
-                    f"🎰 **+1 LOTTERY TICKET!** ({ticket_count} total)\n"
-                    "🐸⚡",
-                    parse_mode="Markdown"
-                )
-
+    memeseal_dp.message(F.successful_payment)(memeseal_payment_success)
 
     async def background_seal_stars(user_id: int, file_info: dict, message_to_edit, ticket_count: int):
         """Background task to seal file paid with Stars"""
@@ -2399,7 +3008,8 @@ if memeseal_dp:
                         parse_mode="Markdown",
                         reply_markup=retry_keyboard
                     )
-                    # Store for retry
+                    # Store for retry; the Stars invoice was paid.
+                    file_info["paid"] = True
                     pending_files[user_id] = file_info
                 except:
                     pass
@@ -2411,6 +3021,7 @@ if memeseal_dp:
                         parse_mode="Markdown",
                         reply_markup=retry_keyboard
                     )
+                    file_info["paid"] = True
                     pending_files[user_id] = file_info
                 except:
                     pass
@@ -2423,58 +3034,9 @@ if memeseal_dp:
                     pass
 
     # Agent 9: Retry handler for failed seals
-    @memeseal_dp.callback_query(F.data == "ms_retry_seal")
-    async def memeseal_retry_seal(callback: types.CallbackQuery):
-        """Handle retry button for failed seals"""
-        user_id = callback.from_user.id
-        await callback.answer("🔄 Retrying...")
+    memeseal_dp.callback_query(F.data == "ms_retry_seal")(memeseal_retry_seal)
 
-        if user_id not in pending_files:
-            await callback.message.edit_text(
-                "⚠️ **Session Expired**\n\n"
-                "Please send your file again to seal it.",
-                parse_mode="Markdown"
-            )
-            return
-
-        file_info = pending_files[user_id]
-        del pending_files[user_id]
-
-        # Show progress
-        progress_msg = await callback.message.edit_text(
-            f"⏳ **RETRYING...**\n\n"
-            f"Sealing to blockchain.\n"
-            f"This takes 5-15 seconds.\n\n"
-            f"_Please wait..._",
-            parse_mode="Markdown"
-        )
-
-        # Retry in background
-        ticket_count = await db.lottery.count_user_entries(user_id)
-        asyncio.create_task(background_seal_stars(
-            user_id=user_id,
-            file_info=file_info,
-            message_to_edit=progress_msg,
-            ticket_count=ticket_count
-        ))
-
-    @memeseal_dp.message(Command("api"))
-    async def memeseal_api(message: types.Message):
-        user_id = message.from_user.id
-        await message.answer(
-            f"🔧 **MEMESEAL API**\n\n"
-            f"**Your API Key:** `{user_id}`\n"
-            f"**Your Referral:** `https://t.me/MemeSealTON_bot?start=REF{user_id}`\n\n"
-            f"**Endpoints:**\n"
-            f"```\n"
-            f"POST /api/v1/notarize\n"
-            f"POST /api/v1/batch\n"
-            f"GET /api/v1/verify/{{hash}}\n"
-            f"```\n\n"
-            f"**5% referral** on all seals from your link. Forever.\n\n"
-            f"Docs: notaryton.com/memeseal",
-            parse_mode="Markdown"
-        )
+    memeseal_dp.message(Command("api"))(memeseal_api)
 
     @memeseal_dp.message(Command("verify"))
     async def memeseal_verify(message: types.Message):
@@ -2510,42 +3072,14 @@ if memeseal_dp:
             parse_mode="Markdown"
         )
 
-    @memeseal_dp.message(Command("casino"))
-    async def memeseal_casino(message: types.Message):
-        """Open the casino mini app"""
-        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(
-                text="🎰 OPEN CASINO",
-                web_app=WebAppInfo(url="https://casino.notaryton.com")
-            )]
-        ])
-
-        await message.answer(
-            "🎰🐸 **MEMESEAL CASINO**\n\n"
-            "**GAMES:**\n"
-            "• 🎰 Politician Slots (100x jackpot)\n"
-            "• 🚀 Frog Rocket (crash game)\n"
-            "• 🎯 Election Roulette\n\n"
-            "**THE DEAL:**\n"
-            "• 20% of ALL bets feed the lottery pot\n"
-            "• Connect TON wallet to play\n"
-            "• Win big or feed the frogs\n\n"
-            "Tap below to enter the casino 👇",
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
+    memeseal_dp.message(Command("casino"))(memeseal_casino)
 
     @memeseal_dp.message(Command("mytickets"))
     async def memeseal_mytickets(message: types.Message):
         """Show user's lottery tickets - DEGEN STYLE"""
         user_id = message.from_user.id
         ticket_count = await db.lottery.count_user_entries(user_id)
-        total_entries = await db.lottery.get_total_entries()
-
-        if total_entries > 0:
-            win_chance = (ticket_count / total_entries) * 100
-        else:
-            win_chance = 0
+        win_chance = await lottery_win_chance(user_id)
 
         next_draw = get_next_draw_date()
 
@@ -2644,22 +3178,27 @@ if memeseal_dp:
             )
             return
 
-        # Download and seal
-        file_id = message.document.file_id
-        file = await memeseal_bot.get_file(file_id)
-        file_path = f"downloads/{file_id}"
-        os.makedirs("downloads", exist_ok=True)
-        await memeseal_bot.download_file(file.file_path, file_path)
+        # Paid before the seal is sent (one credit, one seal), given back if it is not.
+        if not await take_seal_payment(user_id, has_sub):
+            await message.answer(await localized(user_id, "no_sub"), parse_mode="Markdown")
+            return
 
-        file_hash = hash_file(file_path)
-        comment = f"MemeSeal:{file_hash[:16]}"
-
+        file_path = None
+        sent = False
         try:
-            await send_ton_transaction(comment)
-            await log_notarization(user_id, "memeseal_file", file_hash, paid=True)
+            # Download and seal
+            file_id = message.document.file_id
+            file = await memeseal_bot.get_file(file_id)
+            file_path = f"downloads/{file_id}"
+            os.makedirs("downloads", exist_ok=True)
+            await memeseal_bot.download_file(file.file_path, file_path)
 
-            if not has_sub:
-                await db.users.deduct_payment(user_id, TON_SINGLE_SEAL)
+            file_hash = hash_file(file_path)
+            comment = f"MemeSeal:{file_hash[:16]}"
+
+            await send_ton_transaction(comment)
+            sent = True
+            await log_notarization(user_id, "memeseal_file", file_hash, paid=True)
 
             await message.answer(
                 f"⚡ **SEALED** ⚡\n\n"
@@ -2674,10 +3213,13 @@ if memeseal_dp:
             asyncio.create_task(announce_seal_to_socials(file_hash))
 
         except Exception as e:
+            if not sent:
+                await give_back_seal_payment(user_id, has_sub)
             await message.answer(f"❌ Seal failed: {str(e)}")
 
         try:
-            os.remove(file_path)
+            if file_path:
+                os.remove(file_path)
         except Exception:
             pass
 
@@ -2755,22 +3297,27 @@ if memeseal_dp:
             )
             return
 
-        # Download largest photo
-        photo = message.photo[-1]
-        file = await memeseal_bot.get_file(photo.file_id)
-        file_path = f"downloads/{photo.file_id}.jpg"
-        os.makedirs("downloads", exist_ok=True)
-        await memeseal_bot.download_file(file.file_path, file_path)
+        # Paid before the seal is sent (one credit, one seal), given back if it is not.
+        if not await take_seal_payment(user_id, has_sub):
+            await message.answer(await localized(user_id, "no_sub"), parse_mode="Markdown")
+            return
 
-        file_hash = hash_file(file_path)
-        comment = f"MemeSeal:Screenshot:{file_hash[:12]}"
-
+        file_path = None
+        sent = False
         try:
-            await send_ton_transaction(comment)
-            await log_notarization(user_id, "memeseal_photo", file_hash, paid=True)
+            # Download largest photo
+            photo = message.photo[-1]
+            file = await memeseal_bot.get_file(photo.file_id)
+            file_path = f"downloads/{photo.file_id}.jpg"
+            os.makedirs("downloads", exist_ok=True)
+            await memeseal_bot.download_file(file.file_path, file_path)
 
-            if not has_sub:
-                await db.users.deduct_payment(user_id, TON_SINGLE_SEAL)
+            file_hash = hash_file(file_path)
+            comment = f"MemeSeal:Screenshot:{file_hash[:12]}"
+
+            await send_ton_transaction(comment)
+            sent = True
+            await log_notarization(user_id, "memeseal_photo", file_hash, paid=True)
 
             await message.answer(
                 f"⚡ **SCREENSHOT SEALED** ⚡\n\n"
@@ -2784,10 +3331,13 @@ if memeseal_dp:
             asyncio.create_task(announce_seal_to_socials(file_hash))
 
         except Exception as e:
+            if not sent:
+                await give_back_seal_payment(user_id, has_sub)
             await message.answer(f"❌ Seal failed: {str(e)}")
 
         try:
-            os.remove(file_path)
+            if file_path:
+                os.remove(file_path)
         except Exception:
             pass
 
@@ -2849,212 +3399,33 @@ if MEMESCAN_WEBHOOK_PATH:
 @app.post("/webhook/tonapi")
 async def tonapi_webhook(request: Request):
     """
-    Handle real-time transaction webhooks from TonAPI.
-    This replaces the 30-second polling with instant detection!
+    A signed TonAPI notice that the service wallet saw a transaction.
+
+    It wakes the payment poller and credits nothing itself. It used to credit
+    from the webhook body as well, with no source check and a loose digit
+    match on the comment, and with no shared record of what was credited: the
+    same payment was credited once here and once by the poller, and the
+    bot's own seals (self-transfers whose comment an API caller chooses)
+    were credited as payments. The poller is now the one crediting path,
+    and it reads the transaction from the chain, not from this body.
     """
-    try:
-        # Fail closed: without a secret anyone could POST a forged payment.
-        if not TONAPI_WEBHOOK_SECRET:
-            print("⚠️ TonAPI webhook rejected: TONAPI_WEBHOOK_SECRET is not set")
-            return JSONResponse({"ok": False, "error": "Webhook not configured"}, status_code=503)
-        body = await request.body()
-        signature = request.headers.get("X-TonAPI-Signature", "")
-        expected = hmac.new(
-            TONAPI_WEBHOOK_SECRET.encode(),
-            body,
-            hashlib.sha256
-        ).hexdigest()
-        if not hmac.compare_digest(signature, expected):
-            print(f"⚠️ TonAPI webhook: Invalid signature")
-            return JSONResponse({"ok": False, "error": "Invalid signature"}, status_code=401)
-        data = json.loads(body)
+    # Fail closed: without a secret anyone could make us poll on demand.
+    if not TONAPI_WEBHOOK_SECRET:
+        print("⚠️ TonAPI webhook rejected: TONAPI_WEBHOOK_SECRET is not set")
+        return JSONResponse({"ok": False, "error": "Webhook not configured"}, status_code=503)
+    body = await request.body()
+    signature = request.headers.get("X-TonAPI-Signature", "")
+    expected = hmac.new(
+        TONAPI_WEBHOOK_SECRET.encode(),
+        body,
+        hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        print(f"⚠️ TonAPI webhook: Invalid signature")
+        return JSONResponse({"ok": False, "error": "Invalid signature"}, status_code=401)
 
-        print(f"📡 TonAPI webhook received: {data.get('event_type', 'unknown')}")
-
-        # TonAPI sends transaction events when our wallet receives payments
-        # Event types: "transaction" for incoming transactions
-        event_type = data.get("event_type", "")
-
-        if event_type == "transaction" or "transactions" in data:
-            # Handle transaction event
-            transactions = data.get("transactions", [data.get("transaction", {})])
-
-            for tx in transactions:
-                # Check if it's incoming to our wallet
-                account = tx.get("account", {})
-                account_address = account.get("address", "")
-
-                # Normalize addresses for comparison
-                our_wallet = SERVICE_TON_WALLET.replace("UQ", "").replace("EQ", "").lower()
-                tx_wallet = account_address.replace("0:", "").lower()
-
-                # Extract incoming message
-                in_msg = tx.get("in_msg", {})
-                if not in_msg:
-                    continue
-
-                # Get amount (in nanotons)
-                amount_nano = int(in_msg.get("value", 0))
-                amount_ton = amount_nano / 1e9
-
-                if amount_ton < 0.001:  # Ignore dust
-                    continue
-
-                # Extract memo/comment from message
-                memo = ""
-                msg_data = in_msg.get("msg_data", {})
-                if msg_data.get("@type") == "msg.dataText":
-                    memo = msg_data.get("text", "")
-                elif in_msg.get("decoded_body"):
-                    decoded = in_msg.get("decoded_body", {})
-                    memo = decoded.get("text", "") or decoded.get("comment", "")
-
-                # Also check raw body for memo
-                if not memo and in_msg.get("raw_body"):
-                    try:
-                        import base64
-                        raw = base64.b64decode(in_msg.get("raw_body", ""))
-                        # Skip first 4 bytes (comment op code)
-                        if len(raw) > 4:
-                            memo = raw[4:].decode('utf-8', errors='ignore').strip()
-                    except:
-                        pass
-
-                print(f"💰 TonAPI Payment: {amount_ton:.4f} TON, memo: '{memo}'")
-
-                # Try to find user_id from memo using our SEAL-XXXX format
-                user_id = None
-
-                # Check payment_memo_lookup first (SEAL-A7B3 format)
-                if memo in payment_memo_lookup:
-                    lookup = payment_memo_lookup[memo]
-                    if time.time() - lookup["timestamp"] < 600:  # 10 min validity
-                        user_id = lookup["user_id"]
-                        payment_type = lookup.get("type", "single")
-                        print(f"✅ Matched memo {memo} to user {user_id} ({payment_type})")
-
-                # Fallback: extract numeric user_id from memo
-                if not user_id:
-                    try:
-                        match = re.search(r'\d+', memo)
-                        if match:
-                            user_id = int(match.group())
-                    except:
-                        pass
-
-                if user_id:
-                    # Credit referrer with 5% commission
-                    user = await db.users.get(user_id)
-                    if user and user.referred_by:
-                        referrer_id = user.referred_by
-                        commission = amount_ton * 0.05
-                        await db.users.add_referral_earnings(referrer_id, commission)
-                        print(f"💰 Credited {commission:.4f} TON to referrer {referrer_id}")
-
-                    # Check payment type (subscription vs single)
-                    if amount_ton >= 0.28:  # Subscription (0.3 TON)
-                        await add_subscription(user_id, months=1)
-
-                        # 🎰 LOTTERY: Subscriptions get tickets
-                        await db.lottery.add_entry(user_id, amount_stars=20)  # Equivalent to 20 stars
-                        ticket_count = await db.lottery.count_user_entries(user_id)
-
-                        # Notify user instantly!
-                        for b in [bot, memeseal_bot]:
-                            if b:
-                                try:
-                                    await b.send_message(
-                                        user_id,
-                                        f"🚨 **INSTANT PAYMENT DETECTED!** 🟢\n\n"
-                                        f"✅ {amount_ton:.3f} TON received\n"
-                                        f"✅ Subscription activated (30 days)\n\n"
-                                        f"🎰 **+20 LOTTERY TICKETS!** (Total: {ticket_count})\n\n"
-                                        f"Send me anything to seal! 🐸⚡",
-                                        parse_mode="Markdown"
-                                    )
-                                except:
-                                    pass
-
-                        print(f"⚡ INSTANT: Activated subscription for user {user_id}")
-
-                    elif amount_ton >= TON_SINGLE_SEAL * 0.9:  # Single seal (with small variance)
-                        await db.users.ensure_exists(user_id)
-                        await db.users.add_payment(user_id, amount_ton)
-
-                        # 🎰 LOTTERY: Add entry
-                        await db.lottery.add_entry(user_id, amount_stars=1)
-                        ticket_count = await db.lottery.count_user_entries(user_id)
-
-                        # Check if user has pending file to auto-seal
-                        if user_id in pending_ton_payments:
-                            pending = pending_ton_payments[user_id]
-
-                            if pending.get("file_id"):
-                                # AUTO-SEAL: User already sent file, now payment received
-                                file_id = pending["file_id"]
-                                file_type = pending.get("file_type", "document")
-                                del pending_ton_payments[user_id]
-
-                                # Send progress message and trigger seal
-                                progress_msg = None
-                                for b in [memeseal_bot, bot]:
-                                    if b:
-                                        try:
-                                            progress_msg = await b.send_message(
-                                                user_id,
-                                                f"🚨 **PAYMENT DETECTED!** 🟢\n\n"
-                                                f"✅ {amount_ton:.4f} TON received\n"
-                                                f"⏳ Sealing your file now...",
-                                                parse_mode="Markdown"
-                                            )
-                                            break
-                                        except:
-                                            pass
-
-                                # Trigger seal using module-level function
-                                asyncio.create_task(seal_file_from_webhook(user_id, file_id, file_type, progress_msg))
-                                print(f"⚡ INSTANT: Auto-sealing file for user {user_id}")
-                            else:
-                                # Payment received but no file - just notify
-                                for b in [bot, memeseal_bot]:
-                                    if b:
-                                        try:
-                                            await b.send_message(
-                                                user_id,
-                                                f"🚨 **INSTANT PAYMENT DETECTED!** 🟢\n\n"
-                                                f"✅ {amount_ton:.4f} TON received\n"
-                                                f"✅ Credit added to your account\n\n"
-                                                f"🎰 **+1 LOTTERY TICKET!** (Total: {ticket_count})\n\n"
-                                                f"Now send me what you want sealed! 🐸",
-                                                parse_mode="Markdown"
-                                            )
-                                        except:
-                                            pass
-                        else:
-                            # Generic credit notification
-                            for b in [bot, memeseal_bot]:
-                                if b:
-                                    try:
-                                        await b.send_message(
-                                            user_id,
-                                            f"✅ **Payment Received!**\n\n"
-                                            f"{amount_ton:.4f} TON credited\n"
-                                            f"🎰 +1 lottery ticket (Total: {ticket_count})\n\n"
-                                            f"Send me a file to seal it! 🐸",
-                                            parse_mode="Markdown"
-                                        )
-                                    except:
-                                        pass
-
-                        print(f"⚡ INSTANT: Credited {amount_ton:.4f} TON to user {user_id}")
-
-        return {"ok": True, "processed": True}
-
-    except Exception as e:
-        print(f"⚠️ TonAPI webhook error: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"ok": False, "error": str(e)}
+    _payment_poll_wakeup.set()
+    return {"ok": True, "queued": True}
 
 
 # ========================
@@ -4347,56 +4718,139 @@ async def rugscore_page(request: Request):
 # PUBLIC API ENDPOINTS (Make NotaryTON essential infrastructure)
 # ========================
 
+# ========================
+# API KEYS
+# ========================
+# The API used to take the caller's Telegram user id as its key. Ids are
+# public, so anyone could name any subscriber and make the service wallet
+# pay the fees of a 0.15 TON self-transfer per call, without limit. A key is
+# now a random secret shown once by /api; only its SHA-256 is stored.
+
+API_KEY_PREFIX = "nt_"
+# Seals one key may order per hour, counted per process (each worker keeps its
+# own count, so the effective limit is this times the number of workers).
+API_SEALS_PER_HOUR = _positive_int_env("API_SEALS_PER_HOUR", 30)
+_api_seal_times = {}  # user_id -> deque of seal timestamps in the last hour
+
+
+def api_key_hash(key: str) -> str:
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+async def issue_api_key(user_id: int) -> str:
+    """A new API key for user_id, replacing any earlier one. Returns it in clear, once."""
+    key = API_KEY_PREFIX + secrets.token_urlsafe(32)
+    await db.api_keys.replace_for_user(user_id, api_key_hash(key))
+    return key
+
+
+async def api_key_user(data):
+    """(user_id, None) for a body carrying a valid API key, else (None, 401 response)."""
+    key = data.get("api_key") if isinstance(data, dict) else None
+    if not isinstance(key, str) or not key.startswith(API_KEY_PREFIX) or len(key) > 128:
+        return None, JSONResponse({"success": False, "error": "invalid api key"}, status_code=401)
+    record = await db.api_keys.get(api_key_hash(key))
+    if record is None:
+        return None, JSONResponse({"success": False, "error": "invalid api key"}, status_code=401)
+    return record.user_id, None
+
+
+def api_take_seals(user_id: int, count: int, now=None) -> bool:
+    """Reserve `count` seals in user_id's hourly budget. False (and nothing taken) if over."""
+    from collections import deque
+    now = time.time() if now is None else now
+    times = _api_seal_times.setdefault(user_id, deque())
+    while times and now - times[0] >= 3600:
+        times.popleft()
+    if len(times) + count > API_SEALS_PER_HOUR:
+        return False
+    times.extend([now] * count)
+    return True
+
+
+def _api_rate_limited():
+    return JSONResponse(
+        {"success": False, "error": "rate limit exceeded", "limit_per_hour": API_SEALS_PER_HOUR},
+        status_code=429,
+    )
+
+
+async def _api_body(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 @app.post("/api/v1/notarize")
 async def api_notarize(request: Request):
     """
     Public API for third-party services to notarize contracts
-    
+
     POST /api/v1/notarize
     {
-        "api_key": "user_telegram_id",  // For now, use Telegram user ID
+        "api_key": "nt_...",             // from /api in the bot (subscribers)
         "contract_address": "EQ...",     // TON address or tx hash
         "metadata": {                    // Optional
             "project_name": "MyCoin",
             "launch_date": "2025-11-24"
         }
     }
-    
+
     Returns: {"success": true, "hash": "...", "tx_url": "https://tonscan.org/..."}
     """
+    data = await _api_body(request)
+    if data is None:
+        return JSONResponse({"success": False, "error": "invalid body"}, status_code=400)
     try:
-        data = await request.json()
-        user_id = int(data.get("api_key", 0))
+        user_id, denied = await api_key_user(data)
+    except Exception as e:
+        print(f"❌ API key lookup error: {type(e).__name__}: {e}")
+        return JSONResponse({"success": False, "error": "internal error"}, status_code=500)
+    if denied:
+        return denied
+
+    try:
         contract_id = data.get("contract_address", "")
-        metadata = data.get("metadata", {})
-        
-        if not user_id or not contract_id:
+        metadata = data.get("metadata") or {}
+        if not isinstance(contract_id, str) or not contract_id:
             return {"success": False, "error": "Missing api_key or contract_address"}
-        
+        if not isinstance(metadata, dict):
+            metadata = {}
+
         # Check if user has subscription or credits
         has_sub = await get_user_subscription(user_id)
         if not has_sub:
             return {
-                "success": False, 
+                "success": False,
                 "error": "No active subscription",
                 "subscribe_url": f"https://t.me/NotaryTON_bot?start=subscribe"
             }
-        
+
+        if not api_take_seals(user_id, 1):
+            return _api_rate_limited()
+
         # Fetch and notarize contract
         contract_code = await get_contract_code_from_tx(contract_id)
         if not contract_code:
             return {"success": False, "error": "Failed to fetch contract"}
-        
+
         contract_hash = hash_data(contract_code)
         comment = f"NotaryTON:API:{contract_hash[:16]}"
-        
+
         # Add metadata to comment if provided
-        if metadata.get("project_name"):
-            comment = f"NotaryTON:{metadata['project_name'][:20]}:{contract_hash[:12]}"
-        
+        project_name = metadata.get("project_name")
+        if isinstance(project_name, str) and project_name:
+            comment = f"NotaryTON:{project_name[:20]}:{contract_hash[:12]}"
+
         await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
         await log_notarization(user_id, contract_id, contract_hash, paid=True)
-        
+        try:
+            await db.api_keys.record_usage(api_key_hash(data["api_key"]))
+        except Exception:
+            pass
+
         return {
             "success": True,
             "hash": contract_hash,
@@ -4405,9 +4859,10 @@ async def api_notarize(request: Request):
             "tx_url": "https://tonscan.org/",
             "verify_url": f"{WEBHOOK_URL}/api/v1/verify/{contract_hash}"
         }
-        
+
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        print(f"❌ API notarize error: {type(e).__name__}: {e}")
+        return {"success": False, "error": "notarization failed"}
 
 @app.get("/api/v1/verify/{contract_hash}")
 async def api_verify(contract_hash: str):
@@ -4444,26 +4899,36 @@ async def api_verify(contract_hash: str):
 async def api_batch_notarize(request: Request):
     """
     Batch notarization for high-volume users
-    
+
     POST /api/v1/batch
     {
-        "api_key": "user_id",
+        "api_key": "nt_...",
         "contracts": [
             {"address": "EQ...", "name": "Coin1"},
             {"address": "EQ...", "name": "Coin2"}
         ]
     }
-    
-    Returns: Array of results
+
+    Returns: Array of results. Every contract counts against the key's
+    hourly seal budget; a batch that would exceed it is refused whole.
     """
+    data = await _api_body(request)
+    if data is None:
+        return JSONResponse({"success": False, "error": "invalid body"}, status_code=400)
     try:
-        data = await request.json()
-        user_id = int(data.get("api_key", 0))
+        user_id, denied = await api_key_user(data)
+    except Exception as e:
+        print(f"❌ API key lookup error: {type(e).__name__}: {e}")
+        return JSONResponse({"success": False, "error": "internal error"}, status_code=500)
+    if denied:
+        return denied
+
+    try:
         contracts = data.get("contracts", [])
-        
-        if not user_id or not contracts:
+        if not isinstance(contracts, list) or not contracts:
             return {"success": False, "error": "Missing api_key or contracts"}
-        
+        contracts = [c for c in contracts[:50] if isinstance(c, dict)]  # Limit to 50 per batch
+
         # Must have subscription for batch operations
         has_sub = await get_user_subscription(user_id)
         if not has_sub:
@@ -4472,20 +4937,29 @@ async def api_batch_notarize(request: Request):
                 "error": "Subscription required for batch operations",
                 "subscribe_url": f"https://t.me/NotaryTON_bot?start=subscribe"
             }
-        
+
+        if len(contracts) > API_SEALS_PER_HOUR:
+            # Charged whole against the hourly budget, so a larger batch can
+            # never succeed: say so, rather than a 429 that waiting cannot fix.
+            return JSONResponse({"success": False, "error": "batch larger than hourly budget",
+                                 "limit_per_hour": API_SEALS_PER_HOUR}, status_code=400)
+        if not api_take_seals(user_id, len(contracts)):
+            return _api_rate_limited()
+
         results = []
-        for contract in contracts[:50]:  # Limit to 50 per batch
+        for contract in contracts:
+            address = contract.get("address", "")
             try:
-                address = contract.get("address", "")
                 name = contract.get("name", "")
-                
+                name = name if isinstance(name, str) else ""
+
                 contract_code = await get_contract_code_from_tx(address)
                 contract_hash = hash_data(contract_code)
-                
+
                 comment = f"NotaryTON:{name[:20]}:{contract_hash[:12]}" if name else f"NotaryTON:Batch:{contract_hash[:16]}"
                 await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
                 await log_notarization(user_id, address, contract_hash, paid=True)
-                
+
                 results.append({
                     "success": True,
                     "address": address,
@@ -4493,20 +4967,27 @@ async def api_batch_notarize(request: Request):
                     "verify_url": f"{WEBHOOK_URL}/api/v1/verify/{contract_hash}"
                 })
             except Exception as e:
+                print(f"❌ API batch item error: {type(e).__name__}: {e}")
                 results.append({
                     "success": False,
-                    "address": contract.get("address", ""),
-                    "error": str(e)
+                    "address": address if isinstance(address, str) else "",
+                    "error": "notarization failed"
                 })
-        
+
+        try:
+            await db.api_keys.record_usage(api_key_hash(data["api_key"]))
+        except Exception:
+            pass
+
         return {
             "success": True,
             "processed": len(results),
             "results": results
         }
-        
+
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        print(f"❌ API batch error: {type(e).__name__}: {e}")
+        return {"success": False, "error": "batch failed"}
 
 
 # ========================
@@ -4550,7 +5031,7 @@ async def api_user_tickets(user_id: int):
     try:
         ticket_count = await db.lottery.count_user_entries(user_id)
         total_entries = await db.lottery.get_total_entries()
-        win_chance = (ticket_count / total_entries * 100) if total_entries > 0 else 0
+        win_chance = await lottery_win_chance(user_id)
 
         return {
             "success": True,
@@ -4563,58 +5044,189 @@ async def api_user_tickets(user_id: int):
         return {"success": False, "error": str(e)}
 
 
+# ========================
+# CASINO API 🎰
+# Off unless CASINO_ENABLED (see casino_switch). When on, every route that acts
+# for a user takes the user from Telegram Mini App initData, sent in the
+# X-Telegram-Init-Data header and verified against the bot token. A user_id in
+# the path or body is never trusted: it used to let anyone spend, mint and
+# enter the lottery as anyone.
+# ========================
+
+# Reasons a casino request is refused. A closed set: nothing from the request
+# or from an exception is ever echoed back.
+INIT_DATA_MISSING = "missing init data"
+INIT_DATA_MALFORMED = "malformed init data"
+INIT_DATA_BAD_SIGNATURE = "bad init data signature"
+INIT_DATA_EXPIRED = "init data expired"
+INIT_DATA_NO_USER = "init data has no user"
+INIT_DATA_MAX_LENGTH = 8192
+INIT_DATA_CLOCK_SKEW = 60
+
+
+def validate_telegram_init_data(init_data, bot_tokens, max_age, now=None):
+    """(user_id, None) if Telegram signed init_data and it is fresh, else (None, reason).
+
+    Telegram's Mini App spec: secret_key = HMAC_SHA256(key="WebAppData",
+    msg=bot_token); the hash field is hex HMAC_SHA256(key=secret_key,
+    msg=data_check_string), where data_check_string is every other field as
+    key=value, sorted by key, joined by newlines. Any of bot_tokens may have
+    signed it, because the casino opens from both NotaryTON and MemeSeal.
+    """
+    if not init_data:
+        return None, INIT_DATA_MISSING
+    if len(init_data) > INIT_DATA_MAX_LENGTH:
+        return None, INIT_DATA_MALFORMED
+    try:
+        pairs = parse_qsl(init_data, keep_blank_values=True, strict_parsing=True)
+    except ValueError:
+        return None, INIT_DATA_MALFORMED
+    fields = {}
+    for key, value in pairs:
+        if key in fields:
+            return None, INIT_DATA_MALFORMED
+        fields[key] = value
+    received = fields.pop("hash", "")
+    if not received:
+        return None, INIT_DATA_MALFORMED
+
+    data_check_string = "\n".join(f"{key}={fields[key]}" for key in sorted(fields)).encode()
+    signed = False
+    for token in bot_tokens:
+        if not token:
+            continue
+        secret_key = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
+        expected = hmac.new(secret_key, data_check_string, hashlib.sha256).hexdigest()
+        if hmac.compare_digest(expected.encode(), received.encode()):
+            signed = True
+    if not signed:
+        return None, INIT_DATA_BAD_SIGNATURE
+
+    try:
+        auth_date = int(fields.get("auth_date", ""))
+    except ValueError:
+        return None, INIT_DATA_MALFORMED
+    now = time.time() if now is None else now
+    if auth_date > now + INIT_DATA_CLOCK_SKEW:
+        return None, INIT_DATA_MALFORMED
+    if now - auth_date > max_age:
+        return None, INIT_DATA_EXPIRED
+
+    try:
+        user = json.loads(fields.get("user", ""))
+    except ValueError:
+        return None, INIT_DATA_NO_USER
+    user_id = user.get("id") if isinstance(user, dict) else None
+    if not isinstance(user_id, int) or isinstance(user_id, bool) or user_id <= 0:
+        return None, INIT_DATA_NO_USER
+    return user_id, None
+
+
+def casino_user(request: Request):
+    """(user_id, None) for a request with valid initData, else (None, 401 response)."""
+    user_id, reason = validate_telegram_init_data(
+        request.headers.get("X-Telegram-Init-Data", ""),
+        (BOT_TOKEN, MEMESEAL_BOT_TOKEN),
+        CASINO_INIT_DATA_MAX_AGE,
+    )
+    if reason:
+        return None, JSONResponse({"success": False, "error": reason}, status_code=401)
+    return user_id, None
+
+
+async def _casino_body(request: Request):
+    """The JSON object in the body, or None."""
+    try:
+        data = await request.json()
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _whole_chips(value, low: int, high: int):
+    """value if it is an int in [low, high] (not a bool, not a float), else None."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if low <= value <= high else None
+
+
+def _bad_request(error: str):
+    return JSONResponse({"success": False, "error": error}, status_code=400)
+
+
+MAX_CHIP_WAGER = 1_000_000
+
+
+# A wager smaller than this adds no lottery entry: 20% of it rounds down to 0.
+MIN_LOTTERY_WAGER = 5
+
+
+async def _wager_chips(user_id: int, bet: int):
+    """Debit a wager and enter it in the lottery. (debited, entry_stars, chips).
+
+    The lottery entry is sized from chips actually taken from the user's
+    balance, which only a verified Stars payment fills, never from a number
+    the caller sends. No debit, no entry. The entry is exactly 20% of the
+    wager, rounded down: rounding a 1-chip bet up to a 1-star entry made
+    many tiny bets worth more tickets and pot than one big one.
+    """
+    debited, chips = await db.casino.deduct_chips(user_id, bet)
+    if not debited:
+        return False, 0, chips
+    entry_stars = bet // 5  # 20% of the wager feeds the pot
+    if entry_stars > 0:
+        await db.lottery.add_entry(user_id, amount_stars=entry_stars)
+    return True, entry_stars, chips
+
+
 @app.post("/api/v1/casino/bet")
 async def api_casino_bet(request: Request):
     """
-    Record a casino bet and add lottery entry
+    Wager chips from the authenticated user's balance; the wager feeds the lottery.
 
-    POST /api/v1/casino/bet
+    POST /api/v1/casino/bet   (header X-Telegram-Init-Data)
     {
-        "user_id": "wallet_address_or_tg_id",
-        "amount": 0.1,
+        "amount": 10,          // whole chips
         "game": "slots|roulette|crash"
     }
     """
+    user_id, denied = casino_user(request)
+    if denied:
+        return denied
+    data = await _casino_body(request)
+    if data is None:
+        return _bad_request("invalid body")
+    amount = _whole_chips(data.get("amount"), 1, MAX_CHIP_WAGER)
+    if amount is None:
+        return _bad_request("invalid amount")
+    game = data.get("game")
+    game = game[:32] if isinstance(game, str) else "casino"
+
     try:
-        data = await request.json()
-        user_id_str = str(data.get("user_id", "guest"))
-        amount = float(data.get("amount", 0))
-        game = data.get("game", "casino")
-
-        # Convert wallet address to numeric ID if needed
-        if user_id_str.startswith("EQ") or user_id_str.startswith("UQ"):
-            # Hash wallet to get consistent user_id
-            user_id = abs(hash(user_id_str)) % (10**9)
-        else:
-            try:
-                user_id = int(user_id_str)
-            except:
-                user_id = abs(hash(user_id_str)) % (10**9)
-
-        # Ensure user exists
-        await db.users.ensure_exists(user_id)
-
-        # Add lottery entry (equivalent to 1 star per 0.001 TON bet)
-        stars_equivalent = max(1, int(amount * 1000))
-        await db.lottery.add_entry(user_id, amount_stars=stars_equivalent)
-
+        debited, entry_stars, chips = await _wager_chips(user_id, amount)
+        if not debited:
+            return {"success": False, "error": "Insufficient chips", "chips": chips}
         ticket_count = await db.lottery.count_user_entries(user_id)
-
-        return {
-            "success": True,
-            "lottery_entry": True,
-            "tickets_added": 1,
-            "total_tickets": ticket_count,
-            "game": game,
-            "message": f"Bet recorded. +1 lottery ticket!"
-        }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        print(f"❌ Casino bet error: {type(e).__name__}: {e}")
+        return JSONResponse({"success": False, "error": "internal error"}, status_code=500)
+
+    return {
+        "success": True,
+        "lottery_entry": entry_stars > 0,
+        "tickets_added": 1 if entry_stars > 0 else 0,
+        "total_tickets": ticket_count,
+        "lottery_contribution": entry_stars,
+        "chips": chips,
+        "game": game,
+        "message": "Bet recorded. +1 lottery ticket!" if entry_stars > 0
+                   else f"Bet recorded. Bets under {MIN_LOTTERY_WAGER} chips add no lottery ticket."
+    }
 
 
 # ========================
 # CASINO CHIPS SYSTEM 🎰💰
-# Real money casino with Telegram Stars
+# Chips are bought with Telegram Stars
 # ========================
 
 @app.post("/api/v1/casino/buy-chips")
@@ -4622,34 +5234,38 @@ async def api_casino_buy_chips(request: Request):
     """
     Create a Telegram Stars invoice for buying casino chips.
     1 Star = 1 Chip (simple conversion)
-    
-    POST /api/v1/casino/buy-chips
+
+    POST /api/v1/casino/buy-chips   (header X-Telegram-Init-Data)
     {
-        "user_id": 123456789,
         "amount": 100  // Stars/chips to buy
     }
-    
+
     Returns invoice_url to open in Telegram WebApp
     """
+    user_id, denied = casino_user(request)
+    if denied:
+        return denied
+    data = await _casino_body(request)
+    if data is None:
+        return _bad_request("invalid body")
+    amount = data.get("amount", 100)
+    if isinstance(amount, bool) or not isinstance(amount, int):
+        return _bad_request("invalid amount")
+    if amount < 10:
+        return {"success": False, "error": "Minimum purchase is 10 chips"}
+    if amount > 10000:
+        return {"success": False, "error": "Maximum purchase is 10,000 chips"}
+
     try:
-        data = await request.json()
-        user_id = int(data.get("user_id", 0))
-        amount = int(data.get("amount", 100))
-        
-        if amount < 10:
-            return {"success": False, "error": "Minimum purchase is 10 chips"}
-        if amount > 10000:
-            return {"success": False, "error": "Maximum purchase is 10,000 chips"}
-        
         # Ensure user exists
         await db.users.ensure_exists(user_id)
-        
+
         # Create Telegram Stars invoice
         prices = [LabeledPrice(label=f"{amount} Casino Chips", amount=amount)]
-        
+
         # Use memeseal_bot for casino (degen branding)
         active_bot = memeseal_bot if memeseal_bot else bot
-        
+
         invoice = await active_bot.create_invoice_link(
             title=f"{amount} Casino Chips 🎰",
             description=f"Buy {amount} chips to play slots, crash, and roulette. 20% of bets feed the lottery!",
@@ -4658,164 +5274,121 @@ async def api_casino_buy_chips(request: Request):
             prices=prices,
             provider_token="",  # Empty for Stars
         )
-        
-        return {
-            "success": True,
-            "invoice_url": invoice,
-            "amount": amount,
-            "message": f"Open invoice to buy {amount} chips!"
-        }
     except Exception as e:
-        print(f"❌ Casino buy-chips error: {e}")
-        return {"success": False, "error": str(e)}
+        print(f"❌ Casino buy-chips error: {type(e).__name__}: {e}")
+        return JSONResponse({"success": False, "error": "could not create invoice"}, status_code=502)
+
+    return {
+        "success": True,
+        "invoice_url": invoice,
+        "amount": amount,
+        "message": f"Open invoice to buy {amount} chips!"
+    }
 
 
 @app.get("/api/v1/casino/balance/{user_id}")
-async def api_casino_balance(user_id: int):
+async def api_casino_balance(user_id: str, request: Request):
     """
-    Get user's casino chip balance.
-    
-    GET /api/v1/casino/balance/123456789
+    The authenticated user's casino chip balance. The path id must be theirs.
+
+    GET /api/v1/casino/balance/123456789   (header X-Telegram-Init-Data)
     """
+    authed_id, denied = casino_user(request)
+    if denied:
+        return denied
+    if user_id != str(authed_id):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+
     try:
         # Ensure user exists
-        await db.users.ensure_exists(user_id)
-        
-        balance = await db.casino.get_balance(user_id)
-        lottery_tickets = await db.lottery.count_user_entries(user_id)
-        
-        return {
-            "success": True,
-            "user_id": user_id,
-            "chips": balance.chips,
-            "total_wagered": balance.total_wagered,
-            "total_won": balance.total_won,
-            "total_deposited": balance.total_deposited,
-            "total_withdrawn": balance.total_withdrawn,
-            "net_profit": balance.total_won - balance.total_wagered,
-            "lottery_tickets": lottery_tickets
-        }
+        await db.users.ensure_exists(authed_id)
+
+        balance = await db.casino.get_balance(authed_id)
+        lottery_tickets = await db.lottery.count_user_entries(authed_id)
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        print(f"❌ Casino balance error: {type(e).__name__}: {e}")
+        return JSONResponse({"success": False, "error": "internal error"}, status_code=500)
+
+    return {
+        "success": True,
+        "user_id": authed_id,
+        "chips": balance.chips,
+        "total_wagered": balance.total_wagered,
+        "total_won": balance.total_won,
+        "total_deposited": balance.total_deposited,
+        "total_withdrawn": balance.total_withdrawn,
+        "net_profit": balance.total_won - balance.total_wagered,
+        "lottery_tickets": lottery_tickets
+    }
 
 
 @app.post("/api/v1/casino/play")
 async def api_casino_play(request: Request):
     """
-    Place a real money bet with chips.
-    
-    POST /api/v1/casino/play
+    Wager chips on a game played in the Mini App.
+
+    POST /api/v1/casino/play   (header X-Telegram-Init-Data)
     {
-        "user_id": 123456789,
         "bet_amount": 10,
         "game": "slots|roulette|crash",
-        "result": "win|lose",
-        "payout": 50  // Only if win
+        "result": "lose"
     }
+
+    The games run in the browser, so the server cannot know who won. It used
+    to credit whatever "payout" the client sent, which minted chips at will.
+    Now a play only debits the wager; a claimed win is refused with 501 and
+    changes nothing, until outcomes are computed server-side.
     """
+    user_id, denied = casino_user(request)
+    if denied:
+        return denied
+    data = await _casino_body(request)
+    if data is None:
+        return _bad_request("invalid body")
+    if data.get("result", "lose") == "win" or data.get("payout"):
+        return JSONResponse(
+            {"success": False, "error": "payouts are not supported"},
+            status_code=501,
+        )
+    bet_amount = _whole_chips(data.get("bet_amount"), 1, MAX_CHIP_WAGER)
+    if bet_amount is None:
+        return {"success": False, "error": "Bet amount must be positive"}
+
     try:
-        data = await request.json()
-        user_id = int(data.get("user_id", 0))
-        bet_amount = int(data.get("bet_amount", 0))
-        game = data.get("game", "casino")
-        result = data.get("result", "lose")  # "win" or "lose"
-        payout = int(data.get("payout", 0))
-        
-        if bet_amount <= 0:
-            return {"success": False, "error": "Bet amount must be positive"}
-        
-        # Deduct chips for bet
-        success, new_balance = await db.casino.deduct_chips(user_id, bet_amount)
-        
-        if not success:
-            return {
-                "success": False,
-                "error": "Insufficient chips",
-                "chips": new_balance
-            }
-        
-        # Add lottery entry (20% of bet feeds the pot)
-        lottery_contribution = max(1, bet_amount // 5)  # 20%
-        await db.lottery.add_entry(user_id, amount_stars=lottery_contribution)
-        
-        # Process win if applicable
-        if result == "win" and payout > 0:
-            await db.casino.record_win(user_id, payout)
-            balance = await db.casino.get_balance(user_id)
-            return {
-                "success": True,
-                "result": "win",
-                "bet": bet_amount,
-                "payout": payout,
-                "chips": balance.chips,
-                "lottery_contribution": lottery_contribution,
-                "message": f"🎉 You won {payout} chips!"
-            }
-        else:
-            balance = await db.casino.get_balance(user_id)
-            return {
-                "success": True,
-                "result": "lose",
-                "bet": bet_amount,
-                "chips": balance.chips,
-                "lottery_contribution": lottery_contribution,
-                "message": f"Better luck next time! You fed the lottery pot 🐸"
-            }
+        debited, entry_stars, chips = await _wager_chips(user_id, bet_amount)
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        print(f"❌ Casino play error: {type(e).__name__}: {e}")
+        return JSONResponse({"success": False, "error": "internal error"}, status_code=500)
+    if not debited:
+        return {"success": False, "error": "Insufficient chips", "chips": chips}
+
+    return {
+        "success": True,
+        "result": "lose",
+        "bet": bet_amount,
+        "chips": chips,
+        "lottery_contribution": entry_stars,
+        "message": f"Better luck next time! You fed the lottery pot 🐸"
+    }
 
 
 @app.post("/api/v1/casino/withdraw")
 async def api_casino_withdraw(request: Request):
     """
-    Withdraw chips (cash out to TON wallet).
-    Minimum withdrawal: 100 chips
-    
-    POST /api/v1/casino/withdraw
-    {
-        "user_id": 123456789,
-        "amount": 100,
-        "wallet": "EQB..." // TON wallet address
-    }
+    Cash chips out to a TON wallet. Not available.
+
+    It used to debit the chips and answer "queued" with no queue behind it,
+    destroying them. Paying chips out in TON is a transfer at the user's
+    request, so it is closed behind WITHDRAWALS_ENABLED (503 while off), and
+    even then answers 501 and touches nothing until a real, reviewed cash-out
+    exists.
     """
-    try:
-        data = await request.json()
-        user_id = int(data.get("user_id", 0))
-        amount = int(data.get("amount", 0))
-        wallet = data.get("wallet", "")
-        
-        if amount < 100:
-            return {"success": False, "error": "Minimum withdrawal is 100 chips"}
-        
-        if not wallet or not (wallet.startswith("EQ") or wallet.startswith("UQ")):
-            return {"success": False, "error": "Invalid TON wallet address"}
-        
-        # Withdraw chips
-        success, new_balance = await db.casino.withdraw_chips(user_id, amount)
-        
-        if not success:
-            return {
-                "success": False,
-                "error": "Insufficient chips for withdrawal",
-                "chips": new_balance
-            }
-        
-        # Convert chips to TON (1 chip ≈ 0.001 TON based on Star pricing)
-        ton_amount = amount * 0.001
-        
-        # TODO: Actually send TON to wallet
-        # For now, queue for manual processing or use existing withdrawal system
-        
-        return {
-            "success": True,
-            "withdrawn_chips": amount,
-            "ton_equivalent": ton_amount,
-            "remaining_chips": new_balance,
-            "wallet": wallet,
-            "message": f"Withdrawal queued! {ton_amount:.4f} TON will be sent to {wallet[:10]}..."
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    user_id, denied = casino_user(request)
+    if denied:
+        return denied
+    if not WITHDRAWALS_ENABLED:
+        return JSONResponse({"success": False, "error": "withdrawals paused"}, status_code=503)
+    return JSONResponse({"success": False, "error": "chip cash-out is not implemented"}, status_code=501)
 
 
 @app.get("/api/v1/casino/stats")
@@ -4871,32 +5444,33 @@ async def stats():
 # Admin endpoint to seed lottery pot (protected by ADMIN_SECRET, see admin_ok)
 @app.post("/admin/seed-lottery")
 async def seed_lottery(request: Request, amount_stars: int = 2500):
-    """Seed the lottery pot with fake entries (admin only)"""
+    """Removed: it added unbacked "house" entries to a pot paid out in TON.
+
+    A pot must only hold stars somebody paid. The legacy house entries are
+    voided by POST /admin/void-legacy-lottery.
+    """
     if not admin_ok(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return JSONResponse({"error": "seeding the lottery is no longer supported"}, status_code=410)
 
-    # Add entries to lottery (creates a "house" user if needed)
-    house_user_id = 1  # System/house user
 
-    try:
-        # Ensure house user exists (create has ON CONFLICT DO NOTHING)
-        await db.users.create(house_user_id, referral_code=f"REF{house_user_id}")
+@app.post("/admin/void-legacy-lottery")
+async def void_legacy_lottery(request: Request):
+    """Void every undrawn lottery entry made before this call, once.
 
-        # Add lottery entry with specified amount
-        await db.lottery.add_entry(house_user_id, amount_stars)
-
-        # Get new pot size
-        pot_stars = await db.lottery.get_pot_size_stars()
-        pot_ton = await db.lottery.get_pot_size_ton()
-
-        return {
-            "success": True,
-            "added_stars": amount_stars,
-            "pot_stars": pot_stars,
-            "pot_ton": pot_ton
-        }
-    except Exception as e:
-        return {"error": str(e)}
+    The pre-Round-1 pot mixes tickets bought with Stars, entries forged
+    through the unauthenticated casino bet route, and unbacked house entries
+    for user 1; nothing in the table tells them apart. This voids all of
+    them (draw_id = -1) and records the count and time in bot_state. It is
+    the operator's call, not a startup migration, because honest tickets go
+    too. In the same transaction it takes back the casino chips that
+    client-claimed wins could account for. Until it has run, no draw runs
+    at all. A second call changes nothing and reports the first run.
+    """
+    if not admin_ok(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    result = await db.lottery.void_legacy_entries()
+    return {"ok": True, **result}
 
 
 @app.post("/admin/import-ton-labels")
@@ -5074,6 +5648,10 @@ async def on_startup():
 
     # Initialize database (PostgreSQL via Neon)
     await db.connect()
+
+    if not await legacy_lottery_voided():
+        print("🚨 POST /admin/void-legacy-lottery has never run: the Sunday draw is skipped "
+              "(nothing drawn, announced or paid) until it does.")
 
     # Initialize social media poster (X + Telegram channel)
     social_poster.initialize()
