@@ -29,10 +29,16 @@
 ### AUDIT COMPLETED
 - 📋 See `docs/AUDIT_REPORT_2026_01.md` for full codebase audit
 - 🔒 Fixed hardcoded API keys in config.py
-- ⚠️ Action needed: Rotate TonAPI keys at tonconsole.com
+- ⚠️ Action needed (owner only): rotate both TonAPI keys at tonconsole.com
 
 ### NEXT UP
-- [ ] Rotate TonAPI keys (SECURITY - exposed in git history)
+- [ ] **Owner must rotate both TonAPI keys at tonconsole.com** (SECURITY). They are
+      redacted from the tree but still readable in this public repo's git history, so
+      only rotation revokes them. No code change or agent can do this; it needs the
+      TonConsole account. Then set the new keys in the host's env vars.
+- [ ] **Owner: check the bot token.** A Telegram bot token sat in `DEPLOYMENT.md` in the
+      first commits (gone from the tree since Dec 2025, still in history). If it is still
+      a live token, revoke it with @BotFather and update `BOT_TOKEN` on the host.
 - [ ] Test casino Mini App to verify analytics tracking
 - [ ] KOL tracker feature completion
 - [ ] TON ID integration (need CLIENT_ID from @boldov)
