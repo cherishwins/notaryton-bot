@@ -404,7 +404,7 @@ USER A can /withdraw to TON wallet (min 0.05 TON) when WITHDRAWALS_ENABLED=true
 7. **Social auto-posting** - X + Telegram channel
 8. **Multi-language** - EN/RU/ZH
 9. **REST API** - All endpoints functional
-10. **Landing page** - notaryton.com with live pot counter
+10. **Landing page** - notaryton.com (live pot counter only while `LOTTERY_ENABLED` is on)
 
 ---
 
@@ -414,6 +414,7 @@ USER A can /withdraw to TON wallet (min 0.05 TON) when WITHDRAWALS_ENABLED=true
 |------|--------|----------|--------|
 | Casino real money | NOT BUILT | HIGH | 2-3 days |
 | memeseal.vercel.app | 401 ERROR | LOW | Delete it |
+| Lottery | OFF by default (`LOTTERY_ENABLED`): no entries, no draw, no pot shown | HIGH | Legal opinion first (purchase + chance + prize is a lottery under Criminal Code s.206, paid out or not) |
 | Lottery auto-payout | OFF by default (`LOTTERY_AUTO_PAYOUT_ENABLED`) | HIGH | `POST /admin/void-legacy-lottery` once right after deploy (no draw runs until it has), then legal opinion first |
 | Premium MemeScan | NOT BUILT | MEDIUM | 1-2 days |
 | Whale alerts | NOT BUILT | LOW | 2-3 days |

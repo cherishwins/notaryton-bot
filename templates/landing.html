@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MemeSeal TON - Proof or it didn't happen</title>
-    <meta name="description" content="Seal your bags before the rug. Instant on-chain proof on TON. Every seal feeds the weekly lottery pot.">
+    <meta name="description" content="Seal your bags before the rug. Instant on-chain proof on TON.{% if lottery_enabled %} Every seal feeds the weekly lottery pot.{% endif %}">
 
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://notaryton.com/">
     <meta property="og:title" content="MemeSeal TON - Proof or it didn't happen">
-    <meta property="og:description" content="Seal your bags. Feed the lottery. Win big. On-chain proof on TON.">
+    <meta property="og:description" content="Seal your bags.{% if lottery_enabled %} Feed the lottery. Win big.{% endif %} On-chain proof on TON.">
     <meta property="og:image" content="https://notaryton.com/static/memeseal_banner.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
@@ -20,7 +20,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:url" content="https://notaryton.com/">
     <meta name="twitter:title" content="MemeSeal TON - Proof or it didn't happen">
-    <meta name="twitter:description" content="Seal your bags. Feed the lottery. Win big. Receipts or GTFO">
+    <meta name="twitter:description" content="Seal your bags.{% if lottery_enabled %} Feed the lottery. Win big.{% endif %} Receipts or GTFO">
     <meta name="twitter:image" content="https://notaryton.com/static/memeseal_banner.png">
 
     <!-- Favicon -->
@@ -32,6 +32,7 @@
     <!-- Analytics -->
     <script defer src="https://cloud.umami.is/script.js" data-website-id="5d783ccd-fca7-4957-ad7e-06cc2814da83"></script>
 
+    {% if lottery_enabled %}
     <!-- Live Pot Counter + Countdown -->
     <script>
         async function updatePot() {
@@ -76,6 +77,7 @@
         setInterval(updateCountdown, 60000);
         document.addEventListener('DOMContentLoaded', () => { updatePot(); updateCountdown(); });
     </script>
+    {% endif %}
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap');
@@ -627,10 +629,11 @@
         <img src="/static/memeseal_banner.png" alt="MemeSeal TON - Master Stampway & The Frog" class="banner">
         <h1>MEMESEAL TON</h1>
         <p class="tagline">Proof or it didn't happen.</p>
-        <p class="subtagline">One tap = on-chain proof you were early. No more "bro trust me" screenshots. Every seal feeds the pot.</p>
+        <p class="subtagline">One tap = on-chain proof you were early. No more "bro trust me" screenshots.{% if lottery_enabled %} Every seal feeds the pot.{% endif %}</p>
         <a href="https://t.me/{{ memeseal_username }}" class="cta">START SEALING</a>
         <span class="badge">Cheaper than gas on ETH -> 0.15 TON</span>
 
+        {% if lottery_enabled %}
         <!-- LOTTERY BANNER -->
         <div class="lottery-banner">
             <h3>EVERY SEAL FEEDS THE WEEKLY LOTTERY POT</h3>
@@ -638,13 +641,16 @@
             <div class="countdown-row">NEXT DRAW: <span id="countdown">--</span></div>
             <p class="sub">Someone's getting a giant check delivered by a guy in a turtle suit. Might be you.</p>
         </div>
+        {% endif %}
     </div>
 
+    {% if lottery_enabled %}
     <!-- LOTTERY WIN SCENE -->
     <div class="lottery-scene">
         <img src="/static/lottery_win.png" alt="Frog Jackpot Winner" class="scene-img">
         <p class="scene-caption">This could be you. $420,069 TON. Giant check. Turtle suit guy. Confetti.</p>
     </div>
+    {% endif %}
 
     <!-- FEATURES -->
     <div class="features">
@@ -669,7 +675,7 @@
     <!-- PRICING -->
     <div class="pricing">
         <h2>DEGEN PRICING</h2>
-        <p class="pricing-sub">no subscription bullshit unless you want it | every payment feeds the lottery</p>
+        <p class="pricing-sub">no subscription bullshit unless you want it{% if lottery_enabled %} | every payment feeds the lottery{% endif %}</p>
         <div class="price-cards">
             <div class="price-card">
                 <h3>Pay As You Go</h3>
@@ -679,7 +685,7 @@
                     <li>Single seal</li>
                     <li>Instant on-chain proof</li>
                     <li>Permanent verify link</li>
-                    <li>1 lottery ticket per seal</li>
+                    {% if lottery_enabled %}<li>1 lottery ticket per seal</li>{% endif %}
                     <li>Perfect for 47 coins before breakfast</li>
                 </ul>
             </div>
@@ -691,7 +697,7 @@
                     <li>Unlimited seals</li>
                     <li>API access included</li>
                     <li>Batch operations</li>
-                    <li>20 lottery tickets/month</li>
+                    {% if lottery_enabled %}<li>20 lottery tickets/month</li>{% endif %}
                     <li>For real cookers who launch daily</li>
                 </ul>
             </div>
@@ -709,12 +715,12 @@
             <div class="casino-card">
                 <div class="emoji">📈</div>
                 <h3>Event Coins</h3>
-                <p>$FROGTRUMP price tracks real election odds. $FROGWEATHER tracks tomorrow's temp. Rake feeds the pot. Bet on reality.</p>
+                <p>$FROGTRUMP price tracks real election odds. $FROGWEATHER tracks tomorrow's temp.{% if lottery_enabled %} Rake feeds the pot.{% endif %} Bet on reality.</p>
             </div>
             <div class="casino-card">
                 <img src="/static/weekly_show.png" alt="Weekly Live Show" class="card-img">
                 <h3>Weekly Live Show</h3>
-                <p>Puppet frogs roast the news, then we draw the lottery winner on stream. Degen entertainment meets real money.</p>
+                <p>Puppet frogs roast the news{% if lottery_enabled %}, then we draw the lottery winner on stream{% endif %}. Degen entertainment meets real money.</p>
             </div>
             <div class="casino-card">
                 <div class="emoji">🎰</div>
@@ -726,7 +732,7 @@
         <div class="launch-date">LAUNCHING Q1 2026 | EARLY SEALERS GET PRIORITY ACCESS + FREE SPINS</div>
 
         <a href="https://t.me/{{ memeseal_username }}" class="mega-cta">
-            SEAL NOW -> STACK TICKETS
+            SEAL NOW{% if lottery_enabled %} -> STACK TICKETS{% endif %}
         </a>
     </div>
 
@@ -734,11 +740,13 @@
     <div class="testimonials">
         <h2>WHAT SEALERS ARE SAYING</h2>
         <div class="testimonial-strip">
+            {% if lottery_enabled %}
             <div class="testimonial">
                 <div class="stars">*****</div>
                 <p>"Sealed my bag at 4k MC. Won the lottery at 69M MC. Master Stampway called me personally. Life changing."</p>
                 <span class="author">- @whale_anon</span>
             </div>
+            {% endif %}
             <div class="testimonial">
                 <div class="stars">*****</div>
                 <p>"Finally proof I was early. My wife's boyfriend is impressed."</p>
@@ -757,13 +765,13 @@
         <img src="/static/barnes_frog.png" alt="Robert Barnes Frog" class="barnes-img">
         <h3>LEGAL GODFATHER INCOMING</h3>
         <p>Robert Barnes joining soon. Political event coins vetted by the man who bets on elections for fun. The lawyer the establishment fears.</p>
-        <p class="coming">Gavel + lottery ticket + TON blockchain = inevitable</p>
+        <p class="coming">Gavel + {% if lottery_enabled %}lottery ticket + {% endif %}TON blockchain = inevitable</p>
     </div>
 
     <!-- DEV SECTION -->
     <div class="dev-section">
         <h2>DEVELOPERS / COOKERS</h2>
-        <p>Public REST API + 5% referral kickback. Use this to auto-seal every launch on your Pump.fun clone -> feed our lottery -> we all win.</p>
+        <p>Public REST API + 5% referral kickback. Use this to auto-seal every launch on your Pump.fun clone{% if lottery_enabled %} -> feed our lottery -> we all win{% endif %}.</p>
         <div class="code-block">
             <code>
 POST /api/v1/notarize<br>
@@ -772,7 +780,7 @@ POST /api/v1/notarize<br>
 &nbsp;&nbsp;"contract_address": "EQ...",<br>
 &nbsp;&nbsp;"metadata": {"coin": "FROG420"}<br>
 }<br><br>
-// Every API seal = lottery ticket for your users<br>
+{% if lottery_enabled %}// Every API seal = lottery ticket for your users<br>{% endif %}
 // 5% of their payment = yours forever
             </code>
         </div>

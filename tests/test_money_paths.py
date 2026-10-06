@@ -118,6 +118,9 @@ class FakeLottery:
     async def get_total_entries(self, current_only=True):
         return len(self.entries)
 
+    async def get_unique_participants(self):
+        return len({uid for uid, _ in self.entries})
+
     async def get_pot_size_stars(self):
         return int(sum(stars for _, stars in self.entries) * 0.2)
 
@@ -255,6 +258,12 @@ def casino_on(monkeypatch):
     monkeypatch.setattr(bot, "CASINO_ENABLED", True, raising=False)
     monkeypatch.setattr(bot, "BOT_TOKEN", FAKE_TOKEN)
     monkeypatch.setattr(bot, "MEMESEAL_BOT_TOKEN", None)
+
+
+@pytest.fixture
+def lottery_on(monkeypatch):
+    """LOTTERY_ENABLED on: the tests of entries and draws need the lottery running."""
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", True, raising=False)
 
 
 @pytest.fixture
@@ -421,7 +430,8 @@ CASINO_ROUTES = [
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("name", ["CASINO_ENABLED", "LOTTERY_AUTO_PAYOUT_ENABLED", "WITHDRAWALS_ENABLED"])
+@pytest.mark.parametrize("name", ["CASINO_ENABLED", "LOTTERY_ENABLED", "LOTTERY_AUTO_PAYOUT_ENABLED",
+                                  "WITHDRAWALS_ENABLED"])
 def test_money_switches_default_off(monkeypatch, name):
     """Read from a cleared environment, not from whatever .env the developer has."""
     monkeypatch.delenv(name, raising=False)
@@ -455,7 +465,7 @@ def test_casino_off_returns_503_before_anything(client, monkeypatch, method, pat
 # ========================
 
 @pytest.mark.unit
-def test_bet_cannot_enter_another_user_or_a_chosen_amount(client, casino_on, monkeypatch):
+def test_bet_cannot_enter_another_user_or_a_chosen_amount(client, casino_on, monkeypatch, lottery_on):
     """The old route entered any user_id with stars = amount * 1000 for free.
 
     The amount is in range, so this reaches the debit: ALICE has no chips,
@@ -475,7 +485,7 @@ def test_bet_cannot_enter_another_user_or_a_chosen_amount(client, casino_on, mon
     ("/api/v1/casino/bet", {"amount": 10}),
     ("/api/v1/casino/play", {"bet_amount": 10, "result": "lose"}),
 ])
-def test_wager_without_the_chips_adds_no_entry(client, casino_on, monkeypatch, path, body):
+def test_wager_without_the_chips_adds_no_entry(client, casino_on, monkeypatch, path, body, lottery_on):
     db = fake_db(monkeypatch, casino=FakeCasino({ALICE: 9}))
     response = client.post(path, headers=auth(ALICE), json=body)
     assert response.json()["success"] is False
@@ -485,7 +495,7 @@ def test_wager_without_the_chips_adds_no_entry(client, casino_on, monkeypatch, p
 
 @pytest.mark.unit
 @pytest.mark.parametrize("bet,entry", [(1, None), (4, None), (5, 1), (9, 1), (10, 2), (100, 20)])
-def test_wager_entry_is_a_fifth_rounded_down(client, casino_on, monkeypatch, bet, entry):
+def test_wager_entry_is_a_fifth_rounded_down(client, casino_on, monkeypatch, bet, entry, lottery_on):
     """A 1-chip bet used to round up to a 1-star entry: 100 tiny bets beat one big one."""
     db = fake_db(monkeypatch, casino=FakeCasino({ALICE: 1000}))
     response = client.post("/api/v1/casino/bet", headers=auth(ALICE), json={"amount": bet})
@@ -495,7 +505,7 @@ def test_wager_entry_is_a_fifth_rounded_down(client, casino_on, monkeypatch, bet
 
 
 @pytest.mark.unit
-def test_split_wagers_feed_the_pot_like_one_wager(client, casino_on, monkeypatch):
+def test_split_wagers_feed_the_pot_like_one_wager(client, casino_on, monkeypatch, lottery_on):
     db = fake_db(monkeypatch, casino=FakeCasino({ALICE: 100, BOB: 100}))
     for _ in range(100):
         client.post("/api/v1/casino/bet", headers=auth(ALICE), json={"amount": 1})
@@ -505,7 +515,7 @@ def test_split_wagers_feed_the_pot_like_one_wager(client, casino_on, monkeypatch
 
 
 @pytest.mark.unit
-def test_bet_enters_only_debited_chips_for_the_authenticated_user(client, casino_on, monkeypatch):
+def test_bet_enters_only_debited_chips_for_the_authenticated_user(client, casino_on, monkeypatch, lottery_on):
     db = fake_db(monkeypatch, casino=FakeCasino({ALICE: 50}))
     response = client.post("/api/v1/casino/bet", headers=auth(ALICE),
                            json={"user_id": BOB, "amount": 10})
@@ -517,7 +527,7 @@ def test_bet_enters_only_debited_chips_for_the_authenticated_user(client, casino
 
 @pytest.mark.unit
 @pytest.mark.parametrize("amount", [0.5, "10", True, -1, 0, None])
-def test_bet_rejects_non_chip_amounts(client, casino_on, monkeypatch, amount):
+def test_bet_rejects_non_chip_amounts(client, casino_on, monkeypatch, amount, lottery_on):
     db = fake_db(monkeypatch, casino=FakeCasino({ALICE: 50}))
     response = client.post("/api/v1/casino/bet", headers=auth(ALICE), json={"amount": amount})
     assert response.status_code == 400
@@ -525,7 +535,7 @@ def test_bet_rejects_non_chip_amounts(client, casino_on, monkeypatch, amount):
 
 
 @pytest.mark.unit
-def test_play_cannot_credit_a_client_payout(client, casino_on, monkeypatch):
+def test_play_cannot_credit_a_client_payout(client, casino_on, monkeypatch, lottery_on):
     db = fake_db(monkeypatch, casino=FakeCasino({ALICE: 10}))
     response = client.post("/api/v1/casino/play", headers=auth(ALICE), json={
         "user_id": ALICE, "bet_amount": 10, "game": "slots", "result": "win", "payout": 1_000_000})
@@ -536,7 +546,7 @@ def test_play_cannot_credit_a_client_payout(client, casino_on, monkeypatch):
 
 
 @pytest.mark.unit
-def test_play_refuses_any_payout_even_on_a_loss(client, casino_on, monkeypatch):
+def test_play_refuses_any_payout_even_on_a_loss(client, casino_on, monkeypatch, lottery_on):
     db = fake_db(monkeypatch, casino=FakeCasino({ALICE: 10}))
     response = client.post("/api/v1/casino/play", headers=auth(ALICE), json={
         "bet_amount": 10, "result": "lose", "payout": 5})
@@ -546,7 +556,7 @@ def test_play_refuses_any_payout_even_on_a_loss(client, casino_on, monkeypatch):
 
 
 @pytest.mark.unit
-def test_play_debits_the_authenticated_user_only(client, casino_on, monkeypatch):
+def test_play_debits_the_authenticated_user_only(client, casino_on, monkeypatch, lottery_on):
     db = fake_db(monkeypatch, casino=FakeCasino({ALICE: 10, BOB: 100}))
     response = client.post("/api/v1/casino/play", headers=auth(ALICE), json={
         "user_id": BOB, "bet_amount": 10, "result": "lose"})
@@ -761,7 +771,7 @@ async def run_one_draw(monkeypatch):
 
 
 @pytest.fixture
-def draw_world(monkeypatch):
+def draw_world(monkeypatch, lottery_on):
     users = FakeUsers({ALICE: make_user(ALICE, wallet=PAYER.to_str())}, language="zh")
     # pot: 1000 stars = 1.0 TON. The legacy void has run (draws need it).
     lottery = FakeLottery([(ALICE, 5000)], legacy_voided=True)
@@ -1197,7 +1207,7 @@ async def test_poller_credits_real_payment_and_ignores_self_seals(poller_world):
 
 
 @pytest.mark.unit
-async def test_poller_credits_payer_before_referrer(poller_world):
+async def test_poller_credits_payer_before_referrer(poller_world, lottery_on):
     FakeBalancer.transactions = [tx(7, internal(PAYER, 300_000_000, text_body("123456789")))]
     await run_poller()
     names = [c[0] for c in poller_world.users.calls if c[0] in ("add_subscription", "add_referral_earnings")]
@@ -1578,7 +1588,7 @@ async def test_poller_records_a_skipped_range_durably(poller_world, monkeypatch)
 
 
 @pytest.mark.unit
-async def test_payer_credited_then_a_later_step_fails_is_partial_not_failed(poller_world, monkeypatch):
+async def test_payer_credited_then_a_later_step_fails_is_partial_not_failed(poller_world, monkeypatch, lottery_on):
     """'failed' tells a reviewer to credit by hand: it must not be used once the payer has been credited."""
     async def broken(user_id, amount_stars=1):
         raise RuntimeError("db down")
@@ -1799,7 +1809,7 @@ class ChipCasino(FakeCasino):
 
 
 @pytest.mark.unit
-async def test_memeseal_chip_payment_credits_chips_not_a_seal(monkeypatch):
+async def test_memeseal_chip_payment_credits_chips_not_a_seal(monkeypatch, lottery_on):
     """Chip invoices are issued by MemeSeal, whose handler used to sell a seal credit instead."""
     users = FakeUsers()
     casino = ChipCasino()
@@ -1876,3 +1886,220 @@ def test_public_copy_matches_the_api_and_the_poller():
     source = inspect.getsource(bot)
     assert "~1 minute" not in source
     assert bot.TON_POLL_INTERVAL <= 180  # "within about 3 minutes" stays true
+
+
+# ========================
+# LOTTERY_ENABLED: off, there is no lottery (purchase + chance + prize)
+# ========================
+
+def stars_message(payload, stars, user_id=ALICE):
+    answer = Recorder()
+    message = types.SimpleNamespace(
+        from_user=types.SimpleNamespace(id=user_id), answer=answer,
+        successful_payment=types.SimpleNamespace(invoice_payload=payload, total_amount=stars))
+    return message, answer
+
+
+PAID_SEALS = [
+    ("process_successful_payment", f"single_{ALICE}", bot.STARS_SINGLE_NOTARIZATION),
+    ("process_successful_payment", f"subscription_{ALICE}", bot.STARS_MONTHLY_SUBSCRIPTION),
+    ("memeseal_payment_success", f"memeseal_single_{ALICE}", bot.STARS_SINGLE_NOTARIZATION),
+    ("memeseal_payment_success", f"memeseal_sub_{ALICE}", bot.STARS_MONTHLY_SUBSCRIPTION),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("handler,payload,stars", PAID_SEALS)
+async def test_lottery_off_a_paid_seal_buys_no_ticket(monkeypatch, handler, payload, stars):
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", False)
+    monkeypatch.setattr(bot, "pending_files", {})
+    users = FakeUsers()
+    db = fake_db(monkeypatch, users=users)
+    message, answer = stars_message(payload, stars)
+
+    await getattr(bot, handler)(message)
+
+    assert db.lottery.entries == []
+    assert {"add_payment", "add_subscription"} & set(users.names())  # still paid for the seal
+    assert "LOTTERY" not in answer.calls[0][0][0].upper()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("handler,payload,stars", PAID_SEALS)
+async def test_lottery_on_a_paid_seal_buys_tickets_as_before(monkeypatch, lottery_on, handler, payload, stars):
+    monkeypatch.setattr(bot, "pending_files", {})
+    db = fake_db(monkeypatch)
+    message, answer = stars_message(payload, stars)
+
+    await getattr(bot, handler)(message)
+
+    assert db.lottery.entries == [(ALICE, stars)]
+    assert "LOTTERY TICKET" in answer.calls[0][0][0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("nano,credit", [(150_000_000, ("add_payment", 123456789, 0.15)),
+                                         (300_000_000, ("add_subscription", 123456789, 1))])
+async def test_lottery_off_a_ton_payment_buys_no_ticket(poller_world, monkeypatch, nano, credit):
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", False)
+    FakeBalancer.transactions = [tx(7, internal(PAYER, nano, text_body("123456789")))]
+    await run_poller()
+
+    assert payer_credits(poller_world.users) == [credit]
+    assert poller_world.db.lottery.entries == []
+    assert poller_world.db.ton_payments.rows == {bot.ton_tx_key(SERVICE, 7): "credited"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path,body", [
+    ("/api/v1/casino/bet", {"amount": 100}),
+    ("/api/v1/casino/play", {"bet_amount": 100, "result": "lose"}),
+])
+def test_lottery_off_a_wager_makes_no_entry(client, casino_on, monkeypatch, path, body):
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", False)
+    db = fake_db(monkeypatch, casino=FakeCasino({ALICE: 1000}))
+    response = client.post(path, headers=auth(ALICE), json=body).json()
+
+    assert response["success"] is True and db.casino.chips == {ALICE: 900}
+    assert db.lottery.entries == []
+    assert response["lottery_contribution"] == 0
+    assert "lottery" not in response["message"].lower()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("payout_on", [True, False])
+async def test_lottery_off_the_draw_draws_nothing(monkeypatch, draw_world, payout_on):
+    """Everything else is ready (legacy void done, wallet on file): only the switch stops it."""
+    users, lottery, dms = draw_world
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", False)
+    monkeypatch.setattr(bot, "LOTTERY_AUTO_PAYOUT_ENABLED", payout_on, raising=False)
+    send = Recorder()
+    monkeypatch.setattr(bot, "send_payout_transaction", send)
+
+    assert await bot.execute_lottery_draw() is None
+
+    assert lottery.entries == [(ALICE, 5000)]
+    assert lottery.prizes == [] and send.calls == [] and dms == []
+    assert bot.social_poster.post_lottery_winner.calls == []
+
+
+async def startup_tasks(monkeypatch, tmp_path):
+    """Run on_startup with everything outside faked. The names of the tasks it starts."""
+    started = []
+
+    def create_task(coro):
+        started.append(coro.__name__)
+        coro.close()
+
+    async def noop(*args, **kwargs):
+        return None
+
+    async def voided():
+        return True
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(bot, "db", types.SimpleNamespace(
+        connect=noop, lottery=types.SimpleNamespace(legacy_entries_voided=voided)))
+    monkeypatch.setattr(bot, "asyncio", types.SimpleNamespace(create_task=create_task))
+    monkeypatch.setattr(bot.social_poster, "initialize", lambda: None)
+    monkeypatch.setattr(bot, "TELEGRAM_WEBHOOK_SECRET", "")
+    monkeypatch.setattr(bot, "SERVICE_TON_WALLET", None)
+    await bot.on_startup()
+    return started
+
+
+@pytest.mark.unit
+async def test_lottery_off_startup_does_not_start_the_draw(monkeypatch, tmp_path):
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", False)
+    started = await startup_tasks(monkeypatch, tmp_path)
+    assert "run_sunday_lottery_draw" not in started
+    assert "cleanup_pending_payments" in started  # the rest of startup still runs
+
+
+@pytest.mark.unit
+async def test_lottery_on_startup_starts_the_draw(monkeypatch, tmp_path, lottery_on):
+    assert "run_sunday_lottery_draw" in await startup_tasks(monkeypatch, tmp_path)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("handler", ["cmd_pot", "cmd_mytickets"])
+async def test_lottery_off_commands_say_it_is_not_available(monkeypatch, handler):
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", False)
+    fake_db(monkeypatch, users=FakeUsers(language="zh"), lottery=Untouchable())
+    bot.user_languages.pop(ALICE, None)
+    message, answer = withdraw_message(ALICE, "/pot")
+
+    await getattr(bot, handler)(message)
+
+    assert answer.calls[0][0][0] == bot.TRANSLATIONS["zh"]["lottery_unavailable"]
+    bot.user_languages.pop(ALICE, None)
+
+
+@pytest.mark.unit
+async def test_lottery_on_pot_command_shows_the_pot(monkeypatch, lottery_on):
+    fake_db(monkeypatch, lottery=FakeLottery([(ALICE, 5000)]))
+    message, answer = withdraw_message(ALICE, "/pot")
+    await bot.cmd_pot(message)
+    assert "1000 Stars" in answer.calls[0][0][0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("lang", ["en", "ru", "zh"])
+def test_lottery_unavailable_exists_in_every_language(lang):
+    assert bot.TRANSLATIONS[lang]["lottery_unavailable"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", ["/pot", "/api/v1/lottery/pot", f"/api/v1/lottery/tickets/{ALICE}"])
+def test_lottery_off_pot_routes_answer_503(client, monkeypatch, path):
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", False)
+    monkeypatch.setattr(bot, "db", Untouchable())
+    response = client.get(path)
+    assert response.status_code == 503
+    assert response.json() == {"error": "lottery disabled"}
+
+
+@pytest.mark.unit
+def test_lottery_on_pot_route_answers(client, monkeypatch, lottery_on):
+    fake_db(monkeypatch, lottery=FakeLottery([(ALICE, 5000)]))
+    response = client.get("/api/v1/lottery/pot")
+    assert response.status_code == 200 and response.json()["pot_stars"] == 1000
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", ["/", "/terms"])
+def test_lottery_off_public_pages_promise_no_lottery(client, monkeypatch, path):
+    import re
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", False)
+    page = client.get(path).text
+    visible = re.sub(r"<style>.*?</style>", "", page, flags=re.S)  # CSS class names are not copy
+    assert "lottery" not in visible.lower()
+    assert "fetch('/pot')" not in page
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", ["/", "/terms"])
+def test_lottery_on_public_pages_are_unchanged(client, monkeypatch, path, lottery_on):
+    assert "lottery pot" in client.get(path).text.lower()
+
+
+@pytest.mark.unit
+async def test_lottery_off_seal_announcements_carry_no_pot(monkeypatch):
+    import social
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", False)
+    monkeypatch.setattr(bot, "db", Untouchable())
+    announce = Recorder()
+    monkeypatch.setattr(bot, "announce_seal", announce)
+    await bot.announce_seal_to_socials("ab" * 32)
+    assert announce.calls == [(("ab" * 32,), {})]
+
+    poster = social.SocialPoster()
+    poster._initialized = True
+    posts = Recorder()
+    monkeypatch.setattr(poster, "_post_to_twitter", posts)
+    monkeypatch.setattr(poster, "_post_to_telegram", posts)
+    await poster.post_seal_announcement("ab" * 32)
+    await asyncio.sleep(0)
+    texts = [args[0] for args, _ in posts.calls]
+    assert len(texts) == 2
+    assert not any("pot" in text.lower() or "draw" in text.lower() for text in texts)

@@ -112,14 +112,15 @@ class SocialPoster:
     async def post_seal_announcement(
         self,
         file_hash: str,
-        pot_stars: int,
-        pot_ton: float,
-        next_draw: str,
+        pot_stars: Optional[int] = None,
+        pot_ton: Optional[float] = None,
+        next_draw: Optional[str] = None,
         seal_type: str = "file"
     ):
         """
         Post seal announcement to all platforms.
-        Rate-limited to avoid bans.
+        Rate-limited to avoid bans. The lottery lines are left out when
+        pot_stars is None (the lottery is off: see LOTTERY_ENABLED in bot.py).
         """
         if not self._initialized:
             self.initialize()
@@ -128,11 +129,16 @@ class SocialPoster:
         verify_url = f"https://notaryton.com/api/v1/verify/{file_hash}"
         short_hash = file_hash[:12]
 
+        lottery = pot_stars is not None
+        pot_line = (f"🎰 Lottery pot: {pot_stars} ⭐ (~{pot_ton:.4f} TON)\n"
+                    f"⏰ Next draw: {next_draw}\n") if lottery else ""
+        twitter_pot_line = (f"🎰 Pot: {pot_stars}⭐ (~{pot_ton:.4f} TON)\n"
+                            f"⏰ Draw: {next_draw}\n") if lottery else ""
+
         message = (
             f"🐸 New bag sealed forever!\n\n"
             f"🔗 Hash: {short_hash}...\n"
-            f"🎰 Lottery pot: {pot_stars} ⭐ (~{pot_ton:.4f} TON)\n"
-            f"⏰ Next draw: {next_draw}\n\n"
+            f"{pot_line}\n"
             f"Seal yours or stay poor.\n"
             f"👉 t.me/MemeSealTON_bot"
         )
@@ -140,8 +146,7 @@ class SocialPoster:
         twitter_message = (
             f"🐸 New bag sealed forever!\n\n"
             f"🔗 {verify_url}\n"
-            f"🎰 Pot: {pot_stars}⭐ (~{pot_ton:.4f} TON)\n"
-            f"⏰ Draw: {next_draw}\n\n"
+            f"{twitter_pot_line}\n"
             f"Seal yours 👉 t.me/MemeSealTON_bot\n\n"
             f"#TON #MemeSeal #Crypto #Web3"
         )
@@ -231,8 +236,9 @@ class SocialPoster:
 social_poster = SocialPoster()
 
 
-async def announce_seal(file_hash: str, pot_stars: int, pot_ton: float, next_draw: str):
-    """Convenience function to announce a seal"""
+async def announce_seal(file_hash: str, pot_stars: Optional[int] = None,
+                        pot_ton: Optional[float] = None, next_draw: Optional[str] = None):
+    """Convenience function to announce a seal (no lottery lines without a pot)"""
     await social_poster.post_seal_announcement(file_hash, pot_stars, pot_ton, next_draw)
 
 
