@@ -19,7 +19,7 @@ A Telegram bot for auto-notarizing TON blockchain memecoin launches. Single-file
 ### TON Blockchain Integration
 - Uses `pytoniq` library (LiteBalancer + WalletV4R2)
 - Wallet initialized from 24-word mnemonic in `TON_WALLET_SECRET`
-- Transactions send comments formatted as `NotaryTON:Launch:{hash[:16]}`
+- Seal transactions send comments built by `seal_comment()`: `<label>:<full 64-hex SHA-256>`, e.g. `NotaryTON:File:{hash}` (older seals carry only `hash[:16]`, or `hash[:12]` for screenshots; `seal_comment_proof()` accepts both)
 - `get_contract_code_from_tx()`: Fetches contract bytecode via LiteBalancer
 - `poll_wallet_for_payments()`: Background task with exponential backoff retry logic
 

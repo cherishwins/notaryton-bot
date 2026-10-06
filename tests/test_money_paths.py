@@ -2103,3 +2103,116 @@ async def test_lottery_off_seal_announcements_carry_no_pot(monkeypatch):
     texts = [args[0] for args, _ in posts.calls]
     assert len(texts) == 2
     assert not any("pot" in text.lower() or "draw" in text.lower() for text in texts)
+
+
+# ========================
+# Seal comments: the whole SHA-256 on chain
+# ========================
+
+FILE_HASH = hashlib.sha256(b"proof or it didn't happen").hexdigest()
+OTHER_HASH = hashlib.sha256(b"some other file").hexdigest()
+
+
+def comment_cell(comment):
+    """The comment as pytoniq's wallet.transfer(body=<str>) encodes it."""
+    return Builder().store_uint(0, 32).store_snake_string(comment).end_cell()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("label", ["NotaryTON:Contract", "NotaryTON:File", "NotaryTON:Screenshot",
+                                   "NotaryTON:API", "NotaryTON:Batch", "MemeSeal", "MemeSeal:Screenshot"])
+def test_seal_comment_carries_the_full_hash_in_one_cell(label):
+    comment = bot.seal_comment(label, FILE_HASH)
+    assert comment == f"{label}:{FILE_HASH}"
+    assert len(comment.encode()) <= bot.TON_COMMENT_MAX_BYTES
+    cell = comment_cell(comment)
+    assert cell.refs == []
+    assert bot.decode_text_comment(cell) == comment
+    assert bot.seal_comment_proof(comment, FILE_HASH) == "full"
+
+
+@pytest.mark.unit
+def test_a_long_project_name_is_cut_never_the_hash():
+    comment = bot.seal_comment("NotaryTON:" + "🐸" * 20, FILE_HASH)  # 80 bytes of name
+    assert comment.startswith("NotaryTON:🐸") and comment.endswith(":" + FILE_HASH)
+    assert len(comment.encode()) <= bot.TON_COMMENT_MAX_BYTES
+    assert comment_cell(comment).refs == []
+    assert bot.seal_comment_proof(comment, FILE_HASH) == "full"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bad", [FILE_HASH[:16], FILE_HASH[:12], FILE_HASH.upper(), FILE_HASH + "0", ""])
+def test_seal_comment_refuses_anything_but_a_full_hash(bad):
+    with pytest.raises(ValueError):
+        bot.seal_comment("NotaryTON:File", bad)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("comment", [
+    f"NotaryTON:File:{FILE_HASH[:16]}",
+    f"NotaryTON:Contract:{FILE_HASH[:16]}",
+    f"NotaryTON:Screenshot:{FILE_HASH[:12]}",
+    f"MemeSeal:{FILE_HASH[:16]}",
+    f"MemeSeal:Screenshot:{FILE_HASH[:12]}",
+    f"NotaryTON:MyCoin:{FILE_HASH[:12]}",
+])
+def test_an_old_short_prefix_seal_still_verifies_as_a_prefix(comment):
+    """Seals already on chain carry 16 or 12 hex characters: still theirs, but weaker evidence."""
+    assert bot.seal_comment_proof(comment, FILE_HASH) == "prefix"
+    assert bot.seal_comment_proof(comment, FILE_HASH.upper()) == "prefix"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("comment", [
+    f"NotaryTON:File:{OTHER_HASH}",
+    f"NotaryTON:File:{OTHER_HASH[:16]}",
+    f"NotaryTON:File:{FILE_HASH[:8]}",     # never a length seals used
+    f"NotaryTON:File:{FILE_HASH[1:17]}",   # not a prefix
+    "MemeSeal:Deploy",
+    "",
+])
+def test_a_comment_for_another_file_proves_nothing(comment):
+    assert bot.seal_comment_proof(comment, FILE_HASH) is None
+
+
+@pytest.mark.unit
+def test_verify_finds_a_seal_whose_comment_had_only_the_prefix(client, monkeypatch):
+    """The lookup is by the full hash the seal recorded, whatever its comment carried."""
+    row = types.SimpleNamespace(tx_hash="manual_file", timestamp="2025-12-01 00:00:00")
+
+    async def get_by_hash(contract_hash):
+        return row if contract_hash == FILE_HASH else None
+
+    db = fake_db(monkeypatch)
+    db.notarizations = types.SimpleNamespace(get_by_hash=get_by_hash)
+    assert client.get(f"/api/v1/verify/{FILE_HASH}").json()["verified"] is True
+    assert client.get(f"/api/v1/verify/{OTHER_HASH}").json()["verified"] is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("metadata,label", [({}, "NotaryTON:API"),
+                                            ({"project_name": "FROG420"}, "NotaryTON:FROG420")])
+async def test_api_seal_writes_the_full_hash_on_chain(client, api_world, metadata, label):
+    key = await bot.issue_api_key(ALICE)
+    response = client.post("/api/v1/notarize",
+                           json={"api_key": key, "contract_address": "EQ", "metadata": metadata})
+    digest = hashlib.sha256(b"code").hexdigest()
+    assert response.json()["hash"] == digest
+    assert api_world.sends.calls[0][0][0] == f"{label}:{digest}"
+
+
+@pytest.mark.unit
+async def test_batch_seals_write_the_full_hash_on_chain(client, api_world):
+    key = await bot.issue_api_key(ALICE)
+    client.post("/api/v1/batch", json={"api_key": key, "contracts": [
+        {"address": "EQ1", "name": "Coin1"}, {"address": "EQ2"}]})
+    digest = hashlib.sha256(b"code").hexdigest()
+    assert [args[0] for args, _ in api_world.sends.calls] == [
+        f"NotaryTON:Coin1:{digest}", f"NotaryTON:Batch:{digest}"]
+
+
+@pytest.mark.unit
+def test_no_seal_writes_a_truncated_hash():
+    import inspect
+    import re
+    assert not re.search(r'comment = f".*hash\[:\d+\]', inspect.getsource(bot))

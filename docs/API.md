@@ -173,6 +173,18 @@ Verify a notarization by its hash. **No authentication required** - public endpo
 curl https://notaryton.com/api/v1/verify/a3f8b92c1e4d5678901234567890abcdef123456789
 ```
 
+#### Checking the chain yourself
+This endpoint looks the full hash up in NotaryTON's records. The proof that
+does not depend on them is on chain: every seal is a transfer from the service
+wallet to itself whose text comment ends with the file's SHA-256, for example
+`NotaryTON:File:<64 hex characters>` or `MemeSeal:<64 hex characters>`.
+
+Seals made before the full hash went on chain end with only its first 16 hex
+characters (12 for screenshots and named API seals). They still match the
+file, but a 48- or 64-bit prefix can be found by brute force, so treat them as
+weaker evidence than a full match. `seal_comment_proof()` in `bot.py` is the
+rule: `"full"`, `"prefix"`, or no match.
+
 ---
 
 ## Rate Limits

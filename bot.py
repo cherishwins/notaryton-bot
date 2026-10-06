@@ -658,6 +658,49 @@ def hash_data(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+# A text comment is a 32-bit zero op, then the UTF-8 text. One cell holds 1023
+# bits, so 123 bytes of text fit with no continuation cell.
+TON_COMMENT_MAX_BYTES = 123
+# How many hex characters of the hash seals wrote before the whole hash went on
+# chain: 16 (files, contracts, the API) or 12 (screenshots, named API seals).
+LEGACY_SEAL_PREFIX_LENGTHS = (16, 12)
+
+
+def seal_comment(label: str, sha256_hex: str) -> str:
+    """The on-chain comment of a seal: "<label>:<the full SHA-256, 64 hex>".
+
+    Seals used to carry the first 16 hex characters (64 bits), 12 for
+    screenshots (48 bits). A prefix that short can be matched by brute
+    force, so it could not prove which file was sealed. The label, which
+    can hold an API caller's project name, is cut by bytes so the comment
+    still fits one cell; the hash never is.
+    """
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256_hex):
+        raise ValueError("a seal comment needs the full lowercase SHA-256 hex digest")
+    tail = f":{sha256_hex}"
+    room = TON_COMMENT_MAX_BYTES - len(tail.encode())
+    return label.encode()[:room].decode("utf-8", "ignore") + tail
+
+
+def seal_comment_proof(comment: str, sha256_hex: str):
+    """What a seal's on-chain comment proves about a hash: "full", "prefix" or None.
+
+    "full": the comment ends with the whole hash (seals from now on).
+    "prefix": it ends with the 16 or 12 hex characters an older seal wrote,
+    and they match. That seal still counts, but only as 64 or 48 bits of
+    evidence, which is why it is reported apart from a full match.
+    """
+    claimed = comment.rsplit(":", 1)[-1].strip().lower()
+    expected = sha256_hex.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+        return None
+    if claimed == expected:
+        return "full"
+    if len(claimed) in LEGACY_SEAL_PREFIX_LENGTHS and expected.startswith(claimed):
+        return "prefix"
+    return None
+
+
 # ========================
 # ERROR HANDLING HELPERS (Agent 3: Humanized Errors)
 # ========================
@@ -2325,7 +2368,7 @@ async def handle_text_message(message: types.Message):
             return
 
         contract_hash = hash_data(contract_code)
-        comment = f"NotaryTON:Contract:{contract_hash[:16]}"
+        comment = seal_comment("NotaryTON:Contract", contract_hash)
         await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
         sent = True
         await log_notarization(user_id, contract_id, contract_hash, paid=True)
@@ -2383,7 +2426,7 @@ async def handle_document(message: types.Message):
 
         # Hash it
         file_hash = hash_file(file_path)
-        comment = f"NotaryTON:File:{file_hash[:16]}"
+        comment = seal_comment("NotaryTON:File", file_hash)
 
         await send_ton_transaction(comment)
         sent = True
@@ -2448,7 +2491,7 @@ async def handle_photo(message: types.Message):
         await bot.download_file(file.file_path, file_path)
 
         file_hash = hash_file(file_path)
-        comment = f"NotaryTON:Screenshot:{file_hash[:12]}"
+        comment = seal_comment("NotaryTON:Screenshot", file_hash)
 
         await send_ton_transaction(comment)
         sent = True
@@ -2944,7 +2987,7 @@ if memeseal_dp:
             file_hash = hash_file(file_path)
 
             # Try to seal with retries
-            comment = f"MemeSeal:{file_hash[:16]}"
+            comment = seal_comment("MemeSeal", file_hash)
             sealed = False
 
             for attempt in range(5):
@@ -3057,7 +3100,7 @@ if memeseal_dp:
             await memeseal_bot.download_file(file.file_path, file_path)
             file_hash = hash_file(file_path)
 
-            comment = f"MemeSeal:{file_hash[:16]}"
+            comment = seal_comment("MemeSeal", file_hash)
             await send_ton_transaction(comment)
             await log_notarization(user_id, "memeseal_stars_instant", file_hash, paid=True)
 
@@ -3209,7 +3252,7 @@ if memeseal_dp:
                 await memeseal_bot.download_file(file.file_path, file_path)
 
                 file_hash = hash_file(file_path)
-                comment = f"MemeSeal:{file_hash[:16]}"
+                comment = seal_comment("MemeSeal", file_hash)
 
                 try:
                     await send_ton_transaction(comment)
@@ -3284,7 +3327,7 @@ if memeseal_dp:
             await memeseal_bot.download_file(file.file_path, file_path)
 
             file_hash = hash_file(file_path)
-            comment = f"MemeSeal:{file_hash[:16]}"
+            comment = seal_comment("MemeSeal", file_hash)
 
             await send_ton_transaction(comment)
             sent = True
@@ -3330,7 +3373,7 @@ if memeseal_dp:
                 await memeseal_bot.download_file(file.file_path, file_path)
 
                 file_hash = hash_file(file_path)
-                comment = f"MemeSeal:Screenshot:{file_hash[:12]}"
+                comment = seal_comment("MemeSeal:Screenshot", file_hash)
 
                 try:
                     await send_ton_transaction(comment)
@@ -3403,7 +3446,7 @@ if memeseal_dp:
             await memeseal_bot.download_file(file.file_path, file_path)
 
             file_hash = hash_file(file_path)
-            comment = f"MemeSeal:Screenshot:{file_hash[:12]}"
+            comment = seal_comment("MemeSeal:Screenshot", file_hash)
 
             await send_ton_transaction(comment)
             sent = True
@@ -4928,12 +4971,12 @@ async def api_notarize(request: Request):
             return {"success": False, "error": "Failed to fetch contract"}
 
         contract_hash = hash_data(contract_code)
-        comment = f"NotaryTON:API:{contract_hash[:16]}"
+        comment = seal_comment("NotaryTON:API", contract_hash)
 
         # Add metadata to comment if provided
         project_name = metadata.get("project_name")
         if isinstance(project_name, str) and project_name:
-            comment = f"NotaryTON:{project_name[:20]}:{contract_hash[:12]}"
+            comment = seal_comment(f"NotaryTON:{project_name[:20]}", contract_hash)
 
         await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
         await log_notarization(user_id, contract_id, contract_hash, paid=True)
@@ -5047,7 +5090,7 @@ async def api_batch_notarize(request: Request):
                 contract_code = await get_contract_code_from_tx(address)
                 contract_hash = hash_data(contract_code)
 
-                comment = f"NotaryTON:{name[:20]}:{contract_hash[:12]}" if name else f"NotaryTON:Batch:{contract_hash[:16]}"
+                comment = seal_comment(f"NotaryTON:{name[:20]}" if name else "NotaryTON:Batch", contract_hash)
                 await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
                 await log_notarization(user_id, address, contract_hash, paid=True)
 
