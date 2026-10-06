@@ -30,11 +30,11 @@
 
 | Feature | Status | Revenue |
 |---------|--------|---------|
-| **Seal Service** | ✅ LIVE | 1 Star (~$0.02) per seal |
-| **Unlimited Subscription** | ✅ LIVE | 20 Stars (~$0.40) per month |
+| **Seal Service** | ✅ LIVE | 3 Stars (~$0.06) per seal |
+| **Unlimited Subscription** | ✅ LIVE | 50 Stars (~$1.00) or 0.3 TON per month |
 | **Pay with Telegram Stars** | ✅ LIVE | Goes to your Telegram balance |
-| **Pay with TON** | ✅ LIVE | 0.015 TON per seal |
-| **Lottery System** | ✅ LIVE | 20% of fees → weekly pot |
+| **Pay with TON** | ✅ LIVE | 0.15 TON per seal |
+| **Lottery System** | ⏸️ OFF by default (`LOTTERY_ENABLED`), legal opinion first | 20% of fees → weekly pot |
 | **Referral System** | ✅ LIVE | 5% commission |
 
 ---
@@ -115,13 +115,13 @@
 ```
 USER ACTION                    YOU GET
 ─────────────────────────────────────────
-Seals 1 file (1 Star)    →    $0.02
-Buys unlimited (20 Stars)→    $0.40
+Seals 1 file (3 Stars)   →    $0.06
+Buys unlimited (50 Stars)→    $1.00
 Referred user seals      →    5% of their payments
 
-LOTTERY:
+LOTTERY (only with LOTTERY_ENABLED=true; off by default):
 20% of all payments → Weekly pot
-Winner takes all (Sunday 8pm UTC)
+Winner takes all (Sunday 00:00 UTC)
 ```
 
 ---

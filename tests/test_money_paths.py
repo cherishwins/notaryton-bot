@@ -2216,3 +2216,25 @@ def test_no_seal_writes_a_truncated_hash():
     import inspect
     import re
     assert not re.search(r'comment = f".*hash\[:\d+\]', inspect.getsource(bot))
+
+
+# ========================
+# Prices: what is advertised is what the invoice charges
+# ========================
+
+@pytest.mark.unit
+def test_advertised_prices_match_the_invoices():
+    """Copy said 1 Star a seal and 15 or 20 Stars a month; the invoices charge these constants."""
+    import inspect
+    import re
+    from pathlib import Path
+    templates = Path(bot.__file__).parent / "templates"
+    landing = (templates / "landing.html").read_text()
+    notaryton = (templates / "notaryton.html").read_text()
+    assert f">{bot.STARS_SINGLE_NOTARIZATION} STARS<" in landing
+    assert f">{bot.STARS_MONTHLY_SUBSCRIPTION} STARS<" in landing
+    assert f">{bot.STARS_MONTHLY_SUBSCRIPTION} Stars <small>" in notaryton
+    assert not re.search(r"\b(1|15|20) ?⭐|\b(15|20) Stars\b|\b1 ⭐ Star\b", inspect.getsource(bot))
+    for lang in ("en", "ru", "zh"):
+        for key in ("no_sub", "photo_prompt", "file_prompt"):
+            assert str(bot.STARS_SINGLE_NOTARIZATION) in bot.TRANSLATIONS[lang][key]

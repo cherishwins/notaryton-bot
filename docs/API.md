@@ -14,7 +14,7 @@ contract and is refused whole with `429` when it would go over. Every attempt th
 authentication and the subscription check counts, including one that then fails
 ("Failed to fetch contract", a failed send, a failed batch item).
 
-**Requirements**: Active subscription (15 Stars or 0.3 TON/month)
+**Requirements**: Active subscription (50 Stars or 0.3 TON/month)
 
 ---
 

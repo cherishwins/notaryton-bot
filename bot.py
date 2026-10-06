@@ -283,8 +283,8 @@ TRANSLATIONS = {
         "referral_stats": "🎁 **推荐计划**\n\n**您的链接:**\n`{url}`\n\n**佣金:** 5%\n**推荐人数:** {count}\n**收益:** {earnings} TON\n**已提取:** {withdrawn} TON\n**可用:** {available} TON\n\n💡 使用 /withdraw 提现!",
         "status_active": "✅ **订阅有效**\n\n到期: {expiry}\n\n无限封存已启用!",
         "status_inactive": "❌ **无有效订阅**\n\n余额: {credits} TON\n\n使用 /subscribe 获取无限!",
-        "photo_prompt": "📸 **不错的截图!**\n\n1星即可永久封存到TON。",
-        "file_prompt": "📄 **文件已收到!**\n\n1星即可永久封存到TON。",
+        "photo_prompt": "📸 **不错的截图!**\n\n3星即可永久封存到TON。",
+        "file_prompt": "📄 **文件已收到!**\n\n3星即可永久封存到TON。",
         # Agent 10: New strings for enhanced UX
         "sealing_progress": "⏳ **正在封存到区块链...**\n\n您的文件正在TON上获取时间戳。\n这需要5-15秒。",
         "network_busy": "⚠️ **TON网络繁忙**\n\n我们正在自动重试。请稍候。",
@@ -1415,7 +1415,7 @@ async def cmd_subscribe(message: types.Message):
 
     # Create inline keyboard with payment options
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="⭐ Pay with Stars (20 Stars)", callback_data="pay_stars_sub")],
+        [types.InlineKeyboardButton(text=f"⭐ Pay with Stars ({STARS_MONTHLY_SUBSCRIPTION} Stars)", callback_data="pay_stars_sub")],
         [types.InlineKeyboardButton(text="💎 Pay with TON (0.3 TON)", callback_data="pay_ton_sub")]
     ])
 
@@ -1423,7 +1423,7 @@ async def cmd_subscribe(message: types.Message):
         f"💎 **Unlimited Monthly Subscription**\n\n"
         f"**Benefits:** Unlimited notarizations for 30 days\n\n"
         f"**Choose Payment Method:**\n"
-        f"⭐ **Telegram Stars:** 20 Stars (~$1.00)\n"
+        f"⭐ **Telegram Stars:** {STARS_MONTHLY_SUBSCRIPTION} Stars\n"
         f"💎 **TON:** 0.3 TON (~$1.00)\n\n"
         f"Tap a button below to pay:",
         parse_mode="Markdown",
@@ -1746,7 +1746,7 @@ async def cmd_status(message: types.Message):
     if not has_sub and notarization_count > 0:
         # Calculate if subscription would save money
         pay_as_you_go_cost = notarization_count * STARS_SINGLE_NOTARIZATION  # Stars
-        subscription_cost = STARS_MONTHLY_SUBSCRIPTION  # 20 Stars
+        subscription_cost = STARS_MONTHLY_SUBSCRIPTION  # Stars
 
         if notarization_count >= 20:
             savings = pay_as_you_go_cost - subscription_cost
@@ -1756,7 +1756,7 @@ async def cmd_status(message: types.Message):
             seals_to_breakeven = subscription_cost - notarization_count
             status_msg += f"\n💡 **Tip:** {seals_to_breakeven} more seals and subscription pays off!\n"
         else:
-            status_msg += f"\n💡 Subscribe at 20 ⭐ for unlimited seals!"
+            status_msg += f"\n💡 Subscribe at {STARS_MONTHLY_SUBSCRIPTION} ⭐ for unlimited seals!"
     elif not has_sub:
         status_msg += "\n💡 Use /subscribe for unlimited seals!"
 
@@ -2185,7 +2185,7 @@ async def cmd_notarize(message: types.Message):
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="⭐ Pay 3 Stars", callback_data="pay_stars_single")],
             [types.InlineKeyboardButton(text="💎 Pay 0.15 TON", callback_data="pay_ton_single")],
-            [types.InlineKeyboardButton(text="🚀 Unlimited (20 Stars/mo)", callback_data="pay_stars_sub")]
+            [types.InlineKeyboardButton(text=f"🚀 Unlimited ({STARS_MONTHLY_SUBSCRIPTION} Stars/mo)", callback_data="pay_stars_sub")]
         ])
 
         await message.answer(
@@ -2250,7 +2250,7 @@ def get_payment_keyboard():
     return types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="⭐ Pay 3 Stars", callback_data="pay_stars_single")],
         [types.InlineKeyboardButton(text="💎 Pay 0.15 TON", callback_data="pay_ton_single")],
-        [types.InlineKeyboardButton(text="🚀 Unlimited (20 Stars/mo)", callback_data="pay_stars_sub")]
+        [types.InlineKeyboardButton(text=f"🚀 Unlimited ({STARS_MONTHLY_SUBSCRIPTION} Stars/mo)", callback_data="pay_stars_sub")]
     ])
 
 
@@ -2720,7 +2720,7 @@ async def memeseal_payment_success(message: types.Message):
             # Show honest progress message
             progress_msg = await message.answer(
                 f"✅ **PAYMENT RECEIVED!** 🟢\n\n"
-                f"1 ⭐ confirmed — now sealing to blockchain...\n\n"
+                f"{payment.total_amount} ⭐ confirmed — now sealing to blockchain...\n\n"
                 f"⏳ This takes 5-15 seconds.\n"
                 f"{lottery_tickets_line(ticket_count)}"
                 f"_Please wait..._",
@@ -2739,7 +2739,7 @@ async def memeseal_payment_success(message: types.Message):
             tickets_msg = f"🎰 **+1 LOTTERY TICKET!** ({ticket_count} total)\n" if LOTTERY_ENABLED else ""
             await message.answer(
                 "🚨 **PAYMENT CONFIRMED** 🟢\n\n"
-                "1 ⭐ Star received!\n\n"
+                f"{payment.total_amount} ⭐ Stars received!\n\n"
                 "Now send me what you want sealed.\n"
                 "File, screenshot, whatever.\n\n"
                 f"{tickets_msg}"
@@ -2832,7 +2832,7 @@ if memeseal_dp:
             "**HOW IT WORKS:**\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "**1.** Send any file or image\n"
-            "**2.** Pay 1 ⭐ Star (~$0.02)\n"
+            f"**2.** Pay {STARS_SINGLE_NOTARIZATION} ⭐ Stars\n"
             "**3.** Get on-chain seal + verification link\n"
             f"{lottery_step}\n"
             "👇 **Send something to seal it forever**"
@@ -2850,7 +2850,7 @@ if memeseal_dp:
         if LOTTERY_ENABLED:
             buttons.append([types.InlineKeyboardButton(text="💰 Check Lottery Pot", callback_data="ms_check_pot")])
         buttons += [
-            [types.InlineKeyboardButton(text="🚀 Go Unlimited (20 ⭐/mo)", callback_data="ms_pay_stars_sub")]
+            [types.InlineKeyboardButton(text=f"🚀 Go Unlimited ({STARS_MONTHLY_SUBSCRIPTION} ⭐/mo)", callback_data="ms_pay_stars_sub")]
         ]
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -2861,7 +2861,7 @@ if memeseal_dp:
         user_id = message.from_user.id
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="⭐ 20 Stars - Go Unlimited", callback_data="ms_pay_stars_sub")],
+            [types.InlineKeyboardButton(text=f"⭐ {STARS_MONTHLY_SUBSCRIPTION} Stars - Go Unlimited", callback_data="ms_pay_stars_sub")],
             [types.InlineKeyboardButton(text="💎 0.3 TON - Same thing", callback_data="ms_pay_ton_sub")]
         ])
 
@@ -2873,7 +2873,7 @@ if memeseal_dp:
             "• API access included\n"
             "• Batch operations\n"
             "• Priority support (lol jk we respond to everyone)\n\n"
-            "**Price:** 20 Stars OR 0.3 TON\n\n"
+            f"**Price:** {STARS_MONTHLY_SUBSCRIPTION} Stars OR 0.3 TON\n\n"
             "That's like... 2 failed txs on Solana.\n"
             "Except this one actually works. 🐸",
             parse_mode="Markdown",
@@ -3299,11 +3299,11 @@ if memeseal_dp:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [types.InlineKeyboardButton(text="⭐ Pay 3 Stars & Seal Now", callback_data="ms_pay_stars_single")],
                 [types.InlineKeyboardButton(text="💎 Pay 0.15 TON instead", callback_data="ms_pay_ton_single")],
-                [types.InlineKeyboardButton(text="🚀 Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
+                [types.InlineKeyboardButton(text=f"🚀 Unlimited ({STARS_MONTHLY_SUBSCRIPTION} ⭐/mo)", callback_data="ms_pay_stars_sub")]
             ])
             await message.answer(
                 "✅ **Ready to seal!**\n\n"
-                "**Cost:** 1 ⭐ Star (~$0.02)\n"
+                f"**Cost:** {STARS_SINGLE_NOTARIZATION} ⭐ Stars\n"
                 "**You get:** On-chain timestamp + verification link\n\n"
                 "👇 Tap to seal it on TON forever:",
                 parse_mode="Markdown",
@@ -3418,11 +3418,11 @@ if memeseal_dp:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [types.InlineKeyboardButton(text="⭐ Pay 3 Stars & Seal Now", callback_data="ms_pay_stars_single")],
                 [types.InlineKeyboardButton(text="💎 Pay 0.15 TON instead", callback_data="ms_pay_ton_single")],
-                [types.InlineKeyboardButton(text="🚀 Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
+                [types.InlineKeyboardButton(text=f"🚀 Unlimited ({STARS_MONTHLY_SUBSCRIPTION} ⭐/mo)", callback_data="ms_pay_stars_sub")]
             ])
             await message.answer(
                 "✅ **Ready to seal!**\n\n"
-                "**Cost:** 1 ⭐ Star (~$0.02)\n"
+                f"**Cost:** {STARS_SINGLE_NOTARIZATION} ⭐ Stars\n"
                 "**You get:** On-chain timestamp + verification link\n\n"
                 "👇 Tap to seal it on TON forever:",
                 parse_mode="Markdown",

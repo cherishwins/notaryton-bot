@@ -80,14 +80,14 @@ Blockchain timestamping for the masses. Proof that something existed at a specif
 
 ### The Magic
 1. Send file to Telegram bot
-2. Pay 1 Star (5 cents)
+2. Pay 3 Stars (or 0.15 TON)
 3. Sealed on TON forever
 
 No wallet connection. No signup. No friction.
 
 ### Revenue Model
-- Per-seal fees (1 Star / 0.015 TON)
-- Unlimited subscriptions (15 Stars/month)
+- Per-seal fees (3 Stars / 0.15 TON)
+- Unlimited subscriptions (50 Stars / 0.3 TON per month)
 - Lottery (20% of fees to weekly pot): off by default (LOTTERY_ENABLED), pending a legal opinion
 - Referrals (5% commission)
 

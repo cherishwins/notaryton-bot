@@ -26,7 +26,7 @@ A suite of TON blockchain products: notarization, token intelligence, and trader
 Blockchain timestamping for the masses. Seal files on TON forever.
 
 ```
-Send file → Pay 1 Star → Sealed on TON → Verify anytime
+Send file → Pay 3 Stars → Sealed on TON → Verify anytime
 ```
 
 **Features:**
@@ -218,7 +218,7 @@ See `config.py` for all available options.
 |---------|-------------|
 | `/start` | Begin here |
 | `/status` | Check subscription & stats |
-| `/subscribe` | Unlimited seals (15 Stars/mo) |
+| `/subscribe` | Unlimited seals (50 Stars or 0.3 TON a month) |
 | `/pot` | See lottery pot & countdown (says "not available" unless `LOTTERY_ENABLED=true`) |
 | `/mytickets` | Your lottery entries (likewise) |
 | `/referral` | Get your invite link |

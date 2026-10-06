@@ -75,8 +75,8 @@ Blockchain notarization. Users pay Stars or TON to seal files on-chain forever.
 - `social.py` - Auto-posting to X and Telegram channel
 
 **Revenue:**
-- 1 Star (~$0.02) or 0.015 TON per seal
-- 15 Stars/month unlimited subscription
+- 3 Stars or 0.15 TON per seal
+- 50 Stars (or 0.3 TON) a month for unlimited seals
 - 20% to lottery pot, 5% referral commission
 
 ### 2. MemeScan (Growth)

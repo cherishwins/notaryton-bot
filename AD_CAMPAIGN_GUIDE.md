@@ -20,7 +20,7 @@ Screenshot your memecoin bags before they pump.
 
 MemeSeal timestamps it on TON blockchain—forever.
 
-1 Star. 1 tap. Immutable proof you were early.
+3 Stars. 1 tap. Immutable proof you were early.
 ```
 *(copy and paste this too)*
 
@@ -103,8 +103,8 @@ t.me/dedust
 
 | When user does this | You get |
 |---------------------|---------|
-| Seals 1 file | 1 Star (~$0.02) |
-| Buys unlimited subscription | 20 Stars (~$0.40) |
+| Seals 1 file | 3 Stars (~$0.06) |
+| Buys unlimited subscription | 50 Stars (~$1.00) |
 
 Stars go directly to your Telegram Premium/Stars balance.
 
