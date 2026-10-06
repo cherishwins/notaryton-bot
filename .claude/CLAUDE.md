@@ -80,15 +80,15 @@ Blockchain timestamping for the masses. Proof that something existed at a specif
 
 ### The Magic
 1. Send file to Telegram bot
-2. Pay 1 Star (5 cents)
+2. Pay 3 Stars (or 0.15 TON)
 3. Sealed on TON forever
 
 No wallet connection. No signup. No friction.
 
 ### Revenue Model
-- Per-seal fees (1 Star / 0.015 TON)
-- Unlimited subscriptions (15 Stars/month)
-- Lottery (20% of fees to weekly pot)
+- Per-seal fees (3 Stars / 0.15 TON)
+- Unlimited subscriptions (50 Stars / 0.3 TON per month)
+- Lottery (20% of fees to weekly pot): off by default (LOTTERY_ENABLED), pending a legal opinion
 - Referrals (5% commission)
 
 ## Active Integrations
@@ -118,10 +118,16 @@ notaryton-bot/
 
 ## Recent Changes (Dec 2025)
 
-- Lottery draw runs Sundays at midnight UTC; the prize is held in `lottery_prizes`
-  (never in the /withdraw balance). TON auto-payout, /withdraw sends and the casino
-  API are each off unless LOTTERY_AUTO_PAYOUT_ENABLED / WITHDRAWALS_ENABLED /
-  CASINO_ENABLED is `true` (they move value at a user's request: legal opinion first)
+- The lottery is OFF by default, pending a Canadian legal opinion: paid entries,
+  a draw and a prize are a lottery under Criminal Code s.206 whether or not the
+  prize is paid. Unless LOTTERY_ENABLED is `true`, no seal or wager makes an
+  entry, the Sunday draw is not started, /pot and /mytickets say it is not
+  available, and no bot message, page or post shows tickets or a pot
+- With LOTTERY_ENABLED on, the draw runs Sundays at midnight UTC; the prize is held
+  in `lottery_prizes` (never in the /withdraw balance). TON auto-payout, /withdraw
+  sends and the casino API are each off unless LOTTERY_AUTO_PAYOUT_ENABLED /
+  WITHDRAWALS_ENABLED / CASINO_ENABLED is `true` (they move value at a user's
+  request: legal opinion first)
 - Legacy lottery entries are voided only by the operator, once, via
   `POST /admin/void-legacy-lottery` (never at startup), which also takes back
   casino chips minted by forged wins; no Sunday draw runs until it has. Call it
@@ -149,8 +155,8 @@ notaryton-bot/
 - The frog emoji is part of the brand identity
 - "Proof or it didn't happen" is the tagline
 - Russian and Chinese users are important (i18n)
-- Sunday lottery draws at midnight UTC
-- 20% of fees go to lottery pot
+- Sunday lottery draws at midnight UTC, only with LOTTERY_ENABLED on (off by default, legal opinion first)
+- 20% of fees go to lottery pot, likewise only with LOTTERY_ENABLED on
 
 ---
 

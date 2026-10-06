@@ -60,7 +60,7 @@ NotaryTON isn't just a bot—it's a platform that other services depend on. By p
 **Goal**: 100 users, prove PMF
 
 1. **Manual Outreach**
-   - Run `outreach.py` targeting top 50 TON groups
+   - Contact admins of the top 50 TON groups by hand (no mass DMs: Telegram's terms)
    - Offer admins early referral codes
    - Target: 20 admin partnerships
 
@@ -248,7 +248,7 @@ NotaryTON isn't just a bot—it's a platform that other services depend on. By p
 ### Immediate (This Week)
 1. ✅ Deploy to production (Render + domain)
 2. ✅ Test all API endpoints
-3. ⬜ Run `outreach.py` on top 50 groups
+3. ⬜ Contact admins of the top 50 groups by hand (`outreach.py` was removed: mass DMs break Telegram's terms)
 4. ⬜ Get first 10 users
 
 ### Short-Term (Next 2 Weeks)

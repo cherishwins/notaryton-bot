@@ -28,7 +28,7 @@
 ### 2. NotaryTON - Blockchain Timestamping
 - **URL:** https://notaryton.com
 - **Bot:** @NotaryTON_bot
-- **What:** Pay 1 Star (~$0.05) to seal any file/screenshot on TON blockchain forever.
+- **What:** Pay 3 Stars (~$0.15) or 0.15 TON to seal any file/screenshot on TON blockchain forever.
 - **Use case:** Prove you called a trade, document launches, legal timestamps
 - **Tech:** Python/aiogram, PostgreSQL, TON blockchain
 
@@ -82,9 +82,9 @@
 
 | Stream | Price | Status |
 |--------|-------|--------|
-| Per-seal fee | 1 Star ($0.05) or 0.015 TON | LIVE |
-| Unlimited subscription | 20 Stars/month | LIVE |
-| Lottery | 20% of fees → weekly pot | LIVE |
+| Per-seal fee | 3 Stars (~$0.15) or 0.15 TON | LIVE |
+| Unlimited subscription | 50 Stars or 0.3 TON/month | LIVE |
+| Lottery | 20% of fees → weekly pot | OFF by default (`LOTTERY_ENABLED`), legal opinion first |
 | Referrals | 5% commission | LIVE |
 | Casino house edge | TBD | Planned |
 

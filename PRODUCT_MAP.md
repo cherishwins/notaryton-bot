@@ -51,9 +51,9 @@ USER SENDS FILE
 | options        |
 +----------------+
       |
-      +-----> [Pay 1 Star] -----> Telegram Stars checkout
+      +-----> [Pay 3 Stars] ----> Telegram Stars checkout
       |                                    |
-      +-----> [Pay 0.015 TON] --> Shows wallet + memo
+      +-----> [Pay 0.15 TON] ---> Shows wallet + memo
                                            |
                                            v
                               +------------------------+
@@ -83,9 +83,9 @@ USER SENDS FILE
 
 | Action | Price | Revenue |
 |--------|-------|---------|
-| Single seal | 1 Star (~$0.02) | 80% to you, 20% to lottery |
-| Single seal | 0.015 TON (~$0.05) | 80% to you, 20% to lottery |
-| Monthly unlimited | 20 Stars (~$0.40) | 100% to you |
+| Single seal | 3 Stars (~$0.06) | 80% to you, 20% to lottery (100% to you while `LOTTERY_ENABLED` is off) |
+| Single seal | 0.15 TON (~$0.50) | 80% to you, 20% to lottery (likewise) |
+| Monthly unlimited | 50 Stars (~$1.00) | 100% to you |
 | Monthly unlimited | 0.3 TON (~$1.00) | 100% to you |
 | Referral | 5% of referral's payments | Ongoing |
 
@@ -404,7 +404,7 @@ USER A can /withdraw to TON wallet (min 0.05 TON) when WITHDRAWALS_ENABLED=true
 7. **Social auto-posting** - X + Telegram channel
 8. **Multi-language** - EN/RU/ZH
 9. **REST API** - All endpoints functional
-10. **Landing page** - notaryton.com with live pot counter
+10. **Landing page** - notaryton.com (live pot counter only while `LOTTERY_ENABLED` is on)
 
 ---
 
@@ -414,6 +414,7 @@ USER A can /withdraw to TON wallet (min 0.05 TON) when WITHDRAWALS_ENABLED=true
 |------|--------|----------|--------|
 | Casino real money | NOT BUILT | HIGH | 2-3 days |
 | memeseal.vercel.app | 401 ERROR | LOW | Delete it |
+| Lottery | OFF by default (`LOTTERY_ENABLED`): no entries, no draw, no pot shown | HIGH | Legal opinion first (purchase + chance + prize is a lottery under Criminal Code s.206, paid out or not) |
 | Lottery auto-payout | OFF by default (`LOTTERY_AUTO_PAYOUT_ENABLED`) | HIGH | `POST /admin/void-legacy-lottery` once right after deploy (no draw runs until it has), then legal opinion first |
 | Premium MemeScan | NOT BUILT | MEDIUM | 1-2 days |
 | Whale alerts | NOT BUILT | LOW | 2-3 days |

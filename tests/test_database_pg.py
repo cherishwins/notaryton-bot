@@ -180,6 +180,7 @@ async def test_forged_legacy_chips_cannot_be_wagered_into_a_prize_after_the_void
 
     monkeypatch.setattr(bot, "db", pg)
     monkeypatch.setattr(bot, "CASINO_ENABLED", True)
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", True)
     monkeypatch.setattr(bot, "LOTTERY_AUTO_PAYOUT_ENABLED", True)
     monkeypatch.setattr(bot, "BOT_TOKEN", FAKE_TOKEN)
     monkeypatch.setattr(bot, "MEMESEAL_BOT_TOKEN", None)
@@ -225,6 +226,7 @@ async def test_draw_prize_is_what_it_claimed_including_a_mid_draw_entry(pg, monk
     await pg.lottery.void_legacy_entries()
     await pg.lottery.add_entry(51, 100)
     monkeypatch.setattr(bot, "db", pg)
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", True)
     monkeypatch.setattr(bot, "LOTTERY_AUTO_PAYOUT_ENABLED", False)
     _quiet(monkeypatch)
     real_pick = pg.lottery.pick_winner
@@ -246,6 +248,7 @@ async def test_no_draw_before_the_void_leaves_the_legacy_pot_for_it(pg, monkeypa
     await pg.users.ensure_exists(7)
     await pg.lottery.add_entry(7, 500000)  # forged
     monkeypatch.setattr(bot, "db", pg)
+    monkeypatch.setattr(bot, "LOTTERY_ENABLED", True)
     monkeypatch.setattr(bot, "LOTTERY_AUTO_PAYOUT_ENABLED", False)
     _quiet(monkeypatch)
 

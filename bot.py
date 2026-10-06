@@ -73,12 +73,20 @@ def _env_flag(name: str) -> bool:
 
 # Money switches. Each is off unless set to the literal string "true".
 # Paying a lottery prize or a withdrawal to a wallet the user names is the bot
-# transferring value at a user's request, and holding chips or referral balances
-# is holding user funds. Neither is turned on without a written Canadian legal
-# opinion, so the code that does them stays dormant by default.
+# transferring value at a user's request, holding chips or referral balances
+# is holding user funds, and running the lottery at all is running a lottery.
+# None is turned on without a written Canadian legal opinion, so the code that
+# does them stays dormant by default.
 #
 # CASINO_ENABLED: every /api/v1/casino/* route. Off: 503 before the body is read.
 CASINO_ENABLED = _env_flag("CASINO_ENABLED")
+# LOTTERY_ENABLED: the weekly lottery itself. Paying for a seal bought an
+# entry, a draw picked a winner and a prize was recorded: purchase, chance
+# and prize, which is a lottery under s.206 of the Criminal Code whether or
+# not the prize is ever paid out. Off: no entries are made, the Sunday draw
+# is not started (and execute_lottery_draw draws nothing), the pot and ticket
+# routes answer 503, and the bots neither show nor promise tickets or a pot.
+LOTTERY_ENABLED = _env_flag("LOTTERY_ENABLED")
 # LOTTERY_AUTO_PAYOUT_ENABLED: the Sunday draw sends the pot in TON to the
 # winner's saved wallet. Off: the prize is held in lottery_prizes. Whatever
 # its value, no draw runs until POST /admin/void-legacy-lottery has run once
@@ -145,6 +153,21 @@ async def casino_switch(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def lottery_switch(request: Request, call_next):
+    """Refuse the pot and ticket routes while LOTTERY_ENABLED is off.
+
+    The landing page and the casino Mini App poll them, and a pot shown for a
+    lottery that is not running would still be advertising one. A middleware
+    for the same reason as casino_switch.
+    """
+    path = request.url.path
+    if (path == "/pot" or path == "/api/v1/lottery" or path.startswith("/api/v1/lottery/")) \
+            and not LOTTERY_ENABLED:
+        return JSONResponse({"error": "lottery disabled"}, status_code=503)
+    return await call_next(request)
+
+
 # CORS middleware for casino frontend
 app.add_middleware(
     CORSMiddleware,
@@ -197,6 +220,7 @@ TRANSLATIONS = {
         "lottery_prize_held": "🏆 Your prize of {amount} TON is recorded and held for you. No payout wallet is on file, so it will be paid by hand. It is not part of your /withdraw balance.",
         "lottery_payout_review": "⚠️ Sending your prize of {amount} TON did not confirm. It is held for review so it cannot be paid twice. Please contact support.",
         "casino_paused": "⏸️ **The casino is paused**\n\nIt is switched off for now. Your chips are unchanged.",
+        "lottery_unavailable": "⏸️ **The lottery is not available**\n\nThere are no tickets, no pot and no draw. Sealing works as usual.",
         "ton_payment_credited": "✅ **Payment Received!**\n\n{amount} TON credited. You can now seal one file or contract.\n\nSend me a file or contract address! 🔒",
         "ton_payment_short": "✅ **Payment Received!**\n\n{amount} TON credited. Your balance is {balance} TON and one seal costs {price} TON.\n\nSend {short} TON more with the memo `{memo}` to seal.",
         "ton_seal_need_payment": "💎 **Pay with TON**\n\nSend **{price} TON** to:\n`{wallet}`\n\n**Memo:** `{memo}`\n\nYour file is kept. Once the payment is credited (about 3 minutes), tap the button below to seal it.",
@@ -235,6 +259,7 @@ TRANSLATIONS = {
         "lottery_prize_held": "🏆 Ваш выигрыш {amount} TON записан и зарезервирован для вас. Кошелёк для выплаты не указан, поэтому он будет выплачен вручную. Он не входит в баланс /withdraw.",
         "lottery_payout_review": "⚠️ Отправка вашего выигрыша {amount} TON не подтвердилась. Он удержан для проверки, чтобы не быть выплаченным дважды. Пожалуйста, свяжитесь с поддержкой.",
         "casino_paused": "⏸️ **Казино приостановлено**\n\nСейчас оно отключено. Ваши фишки не изменились.",
+        "lottery_unavailable": "⏸️ **Лотерея недоступна**\n\nНет ни билетов, ни банка, ни розыгрыша. Печати работают как обычно.",
         "ton_payment_credited": "✅ **Платёж получен!**\n\nЗачислено {amount} TON. Теперь вы можете запечатать один файл или контракт.\n\nОтправьте мне файл или адрес контракта! 🔒",
         "ton_payment_short": "✅ **Платёж получен!**\n\nЗачислено {amount} TON. Ваш баланс {balance} TON, одна печать стоит {price} TON.\n\nОтправьте ещё {short} TON с комментарием `{memo}`, чтобы запечатать.",
         "ton_seal_need_payment": "💎 **Оплата в TON**\n\nОтправьте **{price} TON** на:\n`{wallet}`\n\n**Комментарий:** `{memo}`\n\nВаш файл сохранён. Когда платёж будет зачислен (около 3 минут), нажмите кнопку ниже, чтобы запечатать его.",
@@ -258,8 +283,8 @@ TRANSLATIONS = {
         "referral_stats": "🎁 **推荐计划**\n\n**您的链接:**\n`{url}`\n\n**佣金:** 5%\n**推荐人数:** {count}\n**收益:** {earnings} TON\n**已提取:** {withdrawn} TON\n**可用:** {available} TON\n\n💡 使用 /withdraw 提现!",
         "status_active": "✅ **订阅有效**\n\n到期: {expiry}\n\n无限封存已启用!",
         "status_inactive": "❌ **无有效订阅**\n\n余额: {credits} TON\n\n使用 /subscribe 获取无限!",
-        "photo_prompt": "📸 **不错的截图!**\n\n1星即可永久封存到TON。",
-        "file_prompt": "📄 **文件已收到!**\n\n1星即可永久封存到TON。",
+        "photo_prompt": "📸 **不错的截图!**\n\n3星即可永久封存到TON。",
+        "file_prompt": "📄 **文件已收到!**\n\n3星即可永久封存到TON。",
         # Agent 10: New strings for enhanced UX
         "sealing_progress": "⏳ **正在封存到区块链...**\n\n您的文件正在TON上获取时间戳。\n这需要5-15秒。",
         "network_busy": "⚠️ **TON网络繁忙**\n\n我们正在自动重试。请稍候。",
@@ -273,6 +298,7 @@ TRANSLATIONS = {
         "lottery_prize_held": "🏆 您的奖金 {amount} TON 已记录并为您保留。您尚未设置收款钱包,因此将人工支付。它不计入 /withdraw 余额。",
         "lottery_payout_review": "⚠️ 您的奖金 {amount} TON 发送未得到确认。为避免重复支付,已保留待审核。请联系客服。",
         "casino_paused": "⏸️ **赌场已暂停**\n\n目前已关闭。您的筹码未变。",
+        "lottery_unavailable": "⏸️ **彩票暂不可用**\n\n目前没有彩票、奖池或开奖。封存功能照常使用。",
         "ton_payment_credited": "✅ **已收到付款!**\n\n已入账 {amount} TON。现在可以封存一个文件或合约。\n\n发送文件或合约地址给我! 🔒",
         "ton_payment_short": "✅ **已收到付款!**\n\n已入账 {amount} TON。您的余额为 {balance} TON,一次封存需要 {price} TON。\n\n请再发送 {short} TON,备注填写 `{memo}`,即可封存。",
         "ton_seal_need_payment": "💎 **使用TON支付**\n\n发送 **{price} TON** 到:\n`{wallet}`\n\n**备注:** `{memo}`\n\n您的文件已保留。付款入账后(约3分钟),点击下方按钮进行封存。",
@@ -401,18 +427,48 @@ async def legacy_lottery_voided() -> bool:
         return False
 
 
+async def enter_lottery(user_id: int, amount_stars: int) -> None:
+    """Enter a payment or wager in the lottery. Nothing while LOTTERY_ENABLED is off.
+
+    Every entry goes through here, so no payment path can buy a ticket
+    while the lottery is off.
+    """
+    if LOTTERY_ENABLED:
+        await db.lottery.add_entry(user_id, amount_stars=amount_stars)
+
+
+def lottery_tickets_line(ticket_count: int, pot_grew_ton: str = "") -> str:
+    """A seal message's ticket (and pot) lines and the blank line after them.
+
+    "" while LOTTERY_ENABLED is off, so no message counts tickets or a pot
+    that the lottery is not running.
+    """
+    if not LOTTERY_ENABLED:
+        return ""
+    lines = f"🎰 Lottery tickets: {ticket_count}\n"
+    if pot_grew_ton:
+        lines += f"💰 Pot grew +{pot_grew_ton} TON\n"
+    return lines + "\n"
+
+
 async def execute_lottery_draw():
     """Run one draw: pick a winner, tell them, and settle the prize.
 
     The prize goes into the lottery_prizes ledger, never into
     users.referral_earnings: /withdraw pays that balance, and a prize there
     would be cashed out by WITHDRAWALS_ENABLED alone. Nothing is drawn at
-    all until the legacy entries have been voided (POST
-    /admin/void-legacy-lottery). TON leaves the service wallet only when
-    LOTTERY_AUTO_PAYOUT_ENABLED is on and the winner has a wallet on file;
-    every other case holds the prize for the operator.
+    all while LOTTERY_ENABLED is off, or until the legacy entries have been
+    voided (POST /admin/void-legacy-lottery). TON leaves the service wallet
+    only when LOTTERY_AUTO_PAYOUT_ENABLED is on and the winner has a wallet
+    on file; every other case holds the prize for the operator.
     """
     from datetime import timezone
+
+    if not LOTTERY_ENABLED:
+        # Picking a winner and recording a prize is the lottery, paid or not.
+        print("⏸️ LOTTERY DRAW SKIPPED: LOTTERY_ENABLED is off. Nothing was drawn, "
+              "announced or recorded.")
+        return None
 
     print("🎰 LOTTERY DRAW STARTING...")
 
@@ -600,6 +656,49 @@ def hash_file(file_path: str) -> str:
 def hash_data(data: bytes) -> str:
     """SHA-256 hash of raw data"""
     return hashlib.sha256(data).hexdigest()
+
+
+# A text comment is a 32-bit zero op, then the UTF-8 text. One cell holds 1023
+# bits, so 123 bytes of text fit with no continuation cell.
+TON_COMMENT_MAX_BYTES = 123
+# How many hex characters of the hash seals wrote before the whole hash went on
+# chain: 16 (files, contracts, the API) or 12 (screenshots, named API seals).
+LEGACY_SEAL_PREFIX_LENGTHS = (16, 12)
+
+
+def seal_comment(label: str, sha256_hex: str) -> str:
+    """The on-chain comment of a seal: "<label>:<the full SHA-256, 64 hex>".
+
+    Seals used to carry the first 16 hex characters (64 bits), 12 for
+    screenshots (48 bits). A prefix that short can be matched by brute
+    force, so it could not prove which file was sealed. The label, which
+    can hold an API caller's project name, is cut by bytes so the comment
+    still fits one cell; the hash never is.
+    """
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256_hex):
+        raise ValueError("a seal comment needs the full lowercase SHA-256 hex digest")
+    tail = f":{sha256_hex}"
+    room = TON_COMMENT_MAX_BYTES - len(tail.encode())
+    return label.encode()[:room].decode("utf-8", "ignore") + tail
+
+
+def seal_comment_proof(comment: str, sha256_hex: str):
+    """What a seal's on-chain comment proves about a hash: "full", "prefix" or None.
+
+    "full": the comment ends with the whole hash (seals from now on).
+    "prefix": it ends with the 16 or 12 hex characters an older seal wrote,
+    and they match. That seal still counts, but only as 64 or 48 bits of
+    evidence, which is why it is reported apart from a full match.
+    """
+    claimed = comment.rsplit(":", 1)[-1].strip().lower()
+    expected = sha256_hex.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+        return None
+    if claimed == expected:
+        return "full"
+    if len(claimed) in LEGACY_SEAL_PREFIX_LENGTHS and expected.startswith(claimed):
+        return "prefix"
+    return None
 
 
 # ========================
@@ -957,7 +1056,7 @@ async def credit_incoming_payment(user_id: int, amount_ton: float, progress: dic
         await db.ton_payments.set_status(tx_key, "payer_credited")
 
     if amount_ton >= TON_SUBSCRIPTION_CREDIT:
-        await db.lottery.add_entry(user_id, amount_stars=20)
+        await enter_lottery(user_id, 20)
         print(f"✅ Activated subscription for user {user_id}")
         text = (
             "✅ **Subscription Activated!**\n\n"
@@ -965,7 +1064,7 @@ async def credit_incoming_payment(user_id: int, amount_ton: float, progress: dic
             "Send me a file or contract address to seal it! 🔒"
         )
     else:
-        await db.lottery.add_entry(user_id, amount_stars=1)
+        await enter_lottery(user_id, 1)
         print(f"✅ Credited {amount_ton} TON to user {user_id}")
         # Sealing needs a balance of TON_SINGLE_SEAL, so only say "you can
         # seal" when the balance really allows it; otherwise say what is short.
@@ -1316,7 +1415,7 @@ async def cmd_subscribe(message: types.Message):
 
     # Create inline keyboard with payment options
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="⭐ Pay with Stars (20 Stars)", callback_data="pay_stars_sub")],
+        [types.InlineKeyboardButton(text=f"⭐ Pay with Stars ({STARS_MONTHLY_SUBSCRIPTION} Stars)", callback_data="pay_stars_sub")],
         [types.InlineKeyboardButton(text="💎 Pay with TON (0.3 TON)", callback_data="pay_ton_sub")]
     ])
 
@@ -1324,7 +1423,7 @@ async def cmd_subscribe(message: types.Message):
         f"💎 **Unlimited Monthly Subscription**\n\n"
         f"**Benefits:** Unlimited notarizations for 30 days\n\n"
         f"**Choose Payment Method:**\n"
-        f"⭐ **Telegram Stars:** 20 Stars (~$1.00)\n"
+        f"⭐ **Telegram Stars:** {STARS_MONTHLY_SUBSCRIPTION} Stars\n"
         f"💎 **TON:** 0.3 TON (~$1.00)\n\n"
         f"Tap a button below to pay:",
         parse_mode="Markdown",
@@ -1537,6 +1636,7 @@ async def credit_casino_chips(message: types.Message, user_id: int, chips_amount
         new_balance = await db.casino.add_chips(user_id, bonus)
 
     bonus_msg = f"\n🎁 **BONUS:** +{bonus} chips!" if bonus > 0 else ""
+    pot_msg = "\n\n20% of all bets feed the lottery pot! 🎫" if LOTTERY_ENABLED else ""
 
     await message.answer(
         f"🎰💰 **CHIPS LOADED!**\n\n"
@@ -1546,8 +1646,8 @@ async def credit_casino_chips(message: types.Message, user_id: int, chips_amount
         f"Open the casino to play:\n"
         f"• 🎰 Politician Slots (100x jackpot)\n"
         f"• 🚀 Frog Rocket (crash game)\n"
-        f"• 🎯 Election Roulette\n\n"
-        f"20% of all bets feed the lottery pot! 🎫",
+        f"• 🎯 Election Roulette"
+        f"{pot_msg}",
         parse_mode="Markdown"
     )
     print(f"🎰 Casino chips purchased: {chips_amount} chips for user {user_id}")
@@ -1572,15 +1672,18 @@ async def process_successful_payment(message: types.Message):
         await db.users.add_payment(user_id, stars_value_ton)
 
         # 🎰 LOTTERY: Subscriptions get tickets too! 1 ticket per Star
-        await db.lottery.add_entry(user_id, amount_stars=payment.total_amount)
-        ticket_count = await db.lottery.count_user_entries(user_id)
+        await enter_lottery(user_id, payment.total_amount)
+        tickets_msg = ""
+        if LOTTERY_ENABLED:
+            ticket_count = await db.lottery.count_user_entries(user_id)
+            tickets_msg = f"🎰 **+{payment.total_amount} LOTTERY TICKETS!** (Total: {ticket_count})\n"
 
         await message.answer(
             "✅ **Subscription Activated!**\n\n"
             "You now have **unlimited notarizations** for 30 days!\n\n"
             "Use /notarize to seal your first contract.\n"
             "Use /api to get API access for integrations.\n\n"
-            f"🎰 **+{payment.total_amount} LOTTERY TICKETS!** (Total: {ticket_count})\n"
+            f"{tickets_msg}"
             "🔒 Thank you for supporting NotaryTON!",
             parse_mode="Markdown"
         )
@@ -1591,8 +1694,11 @@ async def process_successful_payment(message: types.Message):
         await db.users.add_payment(user_id, TON_SINGLE_SEAL)
 
         # 🎰 LOTTERY: Add entry (1 Star = 1 ticket, 20% goes to pot)
-        await db.lottery.add_entry(user_id, amount_stars=payment.total_amount)
-        ticket_count = await db.lottery.count_user_entries(user_id)
+        await enter_lottery(user_id, payment.total_amount)
+        tickets_msg = ""
+        if LOTTERY_ENABLED:
+            ticket_count = await db.lottery.count_user_entries(user_id)
+            tickets_msg = f"🎰 **+1 LOTTERY TICKET!** (Total: {ticket_count})\n"
 
         await message.answer(
             "✅ **Payment Received!**\n\n"
@@ -1600,7 +1706,7 @@ async def process_successful_payment(message: types.Message):
             "Send me:\n"
             "• A contract address (EQ...)\n"
             "• Or upload a file\n\n"
-            f"🎰 **+1 LOTTERY TICKET!** (Total: {ticket_count})\n"
+            f"{tickets_msg}"
             "🔒 I'll seal it on TON blockchain forever!",
             parse_mode="Markdown"
         )
@@ -1618,7 +1724,6 @@ async def cmd_status(message: types.Message):
     # Get user stats
     user = await db.users.get(user_id)
     notarization_count = await db.notarizations.count_by_user(user_id)
-    ticket_count = await db.lottery.count_user_entries(user_id)
 
     stats = {
         "total_paid": user.total_paid if user else 0,
@@ -1629,7 +1734,9 @@ async def cmd_status(message: types.Message):
     status_msg = "✅ **Active Subscription**\n\n" if has_sub else "❌ **No Active Subscription**\n\n"
     status_msg += f"📊 **Your Stats:**\n"
     status_msg += f"• Notarizations: {stats['notarizations']}\n"
-    status_msg += f"• Lottery Tickets: {ticket_count} 🎰\n"
+    if LOTTERY_ENABLED:
+        ticket_count = await db.lottery.count_user_entries(user_id)
+        status_msg += f"• Lottery Tickets: {ticket_count} 🎰\n"
     status_msg += f"• Total Spent: {stats['total_paid']:.4f} TON\n"
 
     if stats['referral_earnings'] > 0:
@@ -1639,7 +1746,7 @@ async def cmd_status(message: types.Message):
     if not has_sub and notarization_count > 0:
         # Calculate if subscription would save money
         pay_as_you_go_cost = notarization_count * STARS_SINGLE_NOTARIZATION  # Stars
-        subscription_cost = STARS_MONTHLY_SUBSCRIPTION  # 20 Stars
+        subscription_cost = STARS_MONTHLY_SUBSCRIPTION  # Stars
 
         if notarization_count >= 20:
             savings = pay_as_you_go_cost - subscription_cost
@@ -1649,7 +1756,7 @@ async def cmd_status(message: types.Message):
             seals_to_breakeven = subscription_cost - notarization_count
             status_msg += f"\n💡 **Tip:** {seals_to_breakeven} more seals and subscription pays off!\n"
         else:
-            status_msg += f"\n💡 Subscribe at 20 ⭐ for unlimited seals!"
+            status_msg += f"\n💡 Subscribe at {STARS_MONTHLY_SUBSCRIPTION} ⭐ for unlimited seals!"
     elif not has_sub:
         status_msg += "\n💡 Use /subscribe for unlimited seals!"
 
@@ -1737,8 +1844,14 @@ def get_next_draw_date() -> str:
 
 
 async def announce_seal_to_socials(file_hash: str):
-    """Post seal announcement to X and Telegram channel (rate-limited)"""
+    """Post seal announcement to X and Telegram channel (rate-limited).
+
+    The pot and next draw are in it only while LOTTERY_ENABLED is on.
+    """
     try:
+        if not LOTTERY_ENABLED:
+            await announce_seal(file_hash)
+            return
         pot_stars = await db.lottery.get_pot_size_stars()
         pot_ton = await db.lottery.get_pot_size_ton()
         next_draw = get_next_draw_date()
@@ -1785,6 +1898,9 @@ async def lottery_win_chance(user_id: int) -> float:
 async def cmd_pot(message: types.Message):
     """Show current lottery pot - DEGEN MODE 🎰 (Agent 8: Enhanced)"""
     user_id = message.from_user.id
+    if not LOTTERY_ENABLED:
+        await message.answer(await localized(user_id, "lottery_unavailable"), parse_mode="Markdown")
+        return
     pot_stars = await db.lottery.get_pot_size_stars()
     pot_ton = await db.lottery.get_pot_size_ton()
     total_entries = await db.lottery.get_total_entries()
@@ -1838,6 +1954,9 @@ async def cmd_pot(message: types.Message):
 async def cmd_mytickets(message: types.Message):
     """Show user's lottery tickets (Agent 8: Enhanced)"""
     user_id = message.from_user.id
+    if not LOTTERY_ENABLED:
+        await message.answer(await localized(user_id, "lottery_unavailable"), parse_mode="Markdown")
+        return
     ticket_count = await db.lottery.count_user_entries(user_id)
     total_entries = await db.lottery.get_total_entries()
     pot_stars = await db.lottery.get_pot_size_stars()
@@ -2066,7 +2185,7 @@ async def cmd_notarize(message: types.Message):
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="⭐ Pay 3 Stars", callback_data="pay_stars_single")],
             [types.InlineKeyboardButton(text="💎 Pay 0.15 TON", callback_data="pay_ton_single")],
-            [types.InlineKeyboardButton(text="🚀 Unlimited (20 Stars/mo)", callback_data="pay_stars_sub")]
+            [types.InlineKeyboardButton(text=f"🚀 Unlimited ({STARS_MONTHLY_SUBSCRIPTION} Stars/mo)", callback_data="pay_stars_sub")]
         ])
 
         await message.answer(
@@ -2131,7 +2250,7 @@ def get_payment_keyboard():
     return types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="⭐ Pay 3 Stars", callback_data="pay_stars_single")],
         [types.InlineKeyboardButton(text="💎 Pay 0.15 TON", callback_data="pay_ton_single")],
-        [types.InlineKeyboardButton(text="🚀 Unlimited (20 Stars/mo)", callback_data="pay_stars_sub")]
+        [types.InlineKeyboardButton(text=f"🚀 Unlimited ({STARS_MONTHLY_SUBSCRIPTION} Stars/mo)", callback_data="pay_stars_sub")]
     ])
 
 
@@ -2249,7 +2368,7 @@ async def handle_text_message(message: types.Message):
             return
 
         contract_hash = hash_data(contract_code)
-        comment = f"NotaryTON:Contract:{contract_hash[:16]}"
+        comment = seal_comment("NotaryTON:Contract", contract_hash)
         await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
         sent = True
         await log_notarization(user_id, contract_id, contract_hash, paid=True)
@@ -2307,7 +2426,7 @@ async def handle_document(message: types.Message):
 
         # Hash it
         file_hash = hash_file(file_path)
-        comment = f"NotaryTON:File:{file_hash[:16]}"
+        comment = seal_comment("NotaryTON:File", file_hash)
 
         await send_ton_transaction(comment)
         sent = True
@@ -2372,7 +2491,7 @@ async def handle_photo(message: types.Message):
         await bot.download_file(file.file_path, file_path)
 
         file_hash = hash_file(file_path)
-        comment = f"NotaryTON:Screenshot:{file_hash[:12]}"
+        comment = seal_comment("NotaryTON:Screenshot", file_hash)
 
         await send_ton_transaction(comment)
         sent = True
@@ -2576,16 +2695,17 @@ async def memeseal_payment_success(message: types.Message):
 
     # 🎰 LOTTERY: Add entry for EVERY payment
     await db.users.ensure_exists(user_id)
-    await db.lottery.add_entry(user_id, amount_stars=payment.total_amount)
+    await enter_lottery(user_id, payment.total_amount)
     ticket_count = await db.lottery.count_user_entries(user_id)
 
     if "sub" in payload:
         await add_subscription(user_id, months=1)
+        tickets_msg = (f"🎰 **+{payment.total_amount} LOTTERY TICKETS!**\n"
+                       f"Total tickets: {ticket_count}\n\n") if LOTTERY_ENABLED else ""
         await message.answer(
             "🚨 **UNLIMITED MODE ACTIVATED** 🟢\n\n"
             "⚡ 30 days of infinite seals unlocked!\n\n"
-            f"🎰 **+{payment.total_amount} LOTTERY TICKETS!**\n"
-            f"Total tickets: {ticket_count}\n\n"
+            f"{tickets_msg}"
             "Send me ANYTHING - I'll seal it all.\n"
             "Files, screenshots, contracts, memes.\n\n"
             "**You're in the club now.** 🐸🚀",
@@ -2600,9 +2720,9 @@ async def memeseal_payment_success(message: types.Message):
             # Show honest progress message
             progress_msg = await message.answer(
                 f"✅ **PAYMENT RECEIVED!** 🟢\n\n"
-                f"1 ⭐ confirmed — now sealing to blockchain...\n\n"
+                f"{payment.total_amount} ⭐ confirmed — now sealing to blockchain...\n\n"
                 f"⏳ This takes 5-15 seconds.\n"
-                f"🎰 Lottery tickets: {ticket_count}\n\n"
+                f"{lottery_tickets_line(ticket_count)}"
                 f"_Please wait..._",
                 parse_mode="Markdown"
             )
@@ -2616,12 +2736,13 @@ async def memeseal_payment_success(message: types.Message):
             ))
         else:
             await db.users.add_payment(user_id, TON_SINGLE_SEAL)
+            tickets_msg = f"🎰 **+1 LOTTERY TICKET!** ({ticket_count} total)\n" if LOTTERY_ENABLED else ""
             await message.answer(
                 "🚨 **PAYMENT CONFIRMED** 🟢\n\n"
-                "1 ⭐ Star received!\n\n"
+                f"{payment.total_amount} ⭐ Stars received!\n\n"
                 "Now send me what you want sealed.\n"
                 "File, screenshot, whatever.\n\n"
-                f"🎰 **+1 LOTTERY TICKET!** ({ticket_count} total)\n"
+                f"{tickets_msg}"
                 "🐸⚡",
                 parse_mode="Markdown"
             )
@@ -2659,6 +2780,7 @@ async def memeseal_casino(message: types.Message):
             web_app=WebAppInfo(url="https://casino.notaryton.com")
         )]
     ])
+    pot_line = "• 20% of ALL bets feed the lottery pot\n" if LOTTERY_ENABLED else ""
 
     await message.answer(
         "🎰🐸 **MEMESEAL CASINO**\n\n"
@@ -2667,7 +2789,7 @@ async def memeseal_casino(message: types.Message):
         "• 🚀 Frog Rocket (crash game)\n"
         "• 🎯 Election Roulette\n\n"
         "**THE DEAL:**\n"
-        "• 20% of ALL bets feed the lottery pot\n"
+        f"{pot_line}"
         "• Connect TON wallet to play\n"
         "• Win big or feed the frogs\n\n"
         "Tap below to enter the casino 👇",
@@ -2695,6 +2817,7 @@ if memeseal_dp:
             await db.users.add_payment(user_id, TON_SINGLE_SEAL)
             free_seal_msg = "\n\n🎁 **PROMO ACTIVATED!** You got 1 free seal. LFG!"
 
+        lottery_step = "**4.** 🎰 Get lottery ticket (20% feeds pot!)\n" if LOTTERY_ENABLED else ""
         welcome_msg = (
             "⚡🐸 **MEMESEAL TON**\n\n"
             "Proof or it didn't happen.\n\n"
@@ -2709,9 +2832,9 @@ if memeseal_dp:
             "**HOW IT WORKS:**\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "**1.** Send any file or image\n"
-            "**2.** Pay 1 ⭐ Star (~$0.02)\n"
+            f"**2.** Pay {STARS_SINGLE_NOTARIZATION} ⭐ Stars\n"
             "**3.** Get on-chain seal + verification link\n"
-            "**4.** 🎰 Get lottery ticket (20% feeds pot!)\n\n"
+            f"{lottery_step}\n"
             "👇 **Send something to seal it forever**"
             f"{free_seal_msg}"
         )
@@ -2724,9 +2847,10 @@ if memeseal_dp:
                 text="🎰 PLAY CASINO",
                 web_app=WebAppInfo(url="https://casino.notaryton.com")
             )])
+        if LOTTERY_ENABLED:
+            buttons.append([types.InlineKeyboardButton(text="💰 Check Lottery Pot", callback_data="ms_check_pot")])
         buttons += [
-            [types.InlineKeyboardButton(text="💰 Check Lottery Pot", callback_data="ms_check_pot")],
-            [types.InlineKeyboardButton(text="🚀 Go Unlimited (20 ⭐/mo)", callback_data="ms_pay_stars_sub")]
+            [types.InlineKeyboardButton(text=f"🚀 Go Unlimited ({STARS_MONTHLY_SUBSCRIPTION} ⭐/mo)", callback_data="ms_pay_stars_sub")]
         ]
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -2737,7 +2861,7 @@ if memeseal_dp:
         user_id = message.from_user.id
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="⭐ 20 Stars - Go Unlimited", callback_data="ms_pay_stars_sub")],
+            [types.InlineKeyboardButton(text=f"⭐ {STARS_MONTHLY_SUBSCRIPTION} Stars - Go Unlimited", callback_data="ms_pay_stars_sub")],
             [types.InlineKeyboardButton(text="💎 0.3 TON - Same thing", callback_data="ms_pay_ton_sub")]
         ])
 
@@ -2749,7 +2873,7 @@ if memeseal_dp:
             "• API access included\n"
             "• Batch operations\n"
             "• Priority support (lol jk we respond to everyone)\n\n"
-            "**Price:** 20 Stars OR 0.3 TON\n\n"
+            f"**Price:** {STARS_MONTHLY_SUBSCRIPTION} Stars OR 0.3 TON\n\n"
             "That's like... 2 failed txs on Solana.\n"
             "Except this one actually works. 🐸",
             parse_mode="Markdown",
@@ -2760,6 +2884,10 @@ if memeseal_dp:
     async def memeseal_check_pot(callback: types.CallbackQuery):
         """Show lottery pot from button"""
         await callback.answer()
+        if not LOTTERY_ENABLED:
+            await callback.message.answer(
+                await localized(callback.from_user.id, "lottery_unavailable"), parse_mode="Markdown")
+            return
         pot_stars = await db.lottery.get_pot_size_stars()
         pot_ton = await db.lottery.get_pot_size_ton()
         total_entries = await db.lottery.get_total_entries()
@@ -2859,7 +2987,7 @@ if memeseal_dp:
             file_hash = hash_file(file_path)
 
             # Try to seal with retries
-            comment = f"MemeSeal:{file_hash[:16]}"
+            comment = seal_comment("MemeSeal", file_hash)
             sealed = False
 
             for attempt in range(5):
@@ -2895,8 +3023,7 @@ if memeseal_dp:
                     f"✅ **SEALED FOREVER!** 🐸⚡\n\n"
                     f"Hash: `{file_hash}`\n"
                     f"🔗 Verify: notaryton.com/api/v1/verify/{file_hash}\n\n"
-                    f"🎰 Lottery tickets: {ticket_count}\n"
-                    f"💰 Pot grew +0.003 TON\n\n"
+                    f"{lottery_tickets_line(ticket_count, '0.003')}"
                     f"**Screenshot this. Post it. Become legend.**",
                     parse_mode="Markdown"
                 )
@@ -2973,7 +3100,7 @@ if memeseal_dp:
             await memeseal_bot.download_file(file.file_path, file_path)
             file_hash = hash_file(file_path)
 
-            comment = f"MemeSeal:{file_hash[:16]}"
+            comment = seal_comment("MemeSeal", file_hash)
             await send_ton_transaction(comment)
             await log_notarization(user_id, "memeseal_stars_instant", file_hash, paid=True)
 
@@ -2983,8 +3110,7 @@ if memeseal_dp:
                 f"✅ **SEALED FOREVER!** 🐸⚡\n\n"
                 f"Hash: `{file_hash}`\n"
                 f"🔗 Verify: notaryton.com/api/v1/verify/{file_hash}\n\n"
-                f"🎰 Lottery tickets: {ticket_count}\n"
-                f"💰 Pot grew +0.002 TON\n\n"
+                f"{lottery_tickets_line(ticket_count, '0.002')}"
                 f"**Screenshot this. Post it. Become legend.**",
                 parse_mode="Markdown"
             )
@@ -3003,7 +3129,7 @@ if memeseal_dp:
                         f"Payment received but seal pending.\n\n"
                         f"Hash: `{file_hash}`\n\n"
                         f"**Your seal is queued** - tap Retry or wait 30s.\n"
-                        f"🎰 Lottery tickets: {ticket_count}\n\n"
+                        f"{lottery_tickets_line(ticket_count)}"
                         f"_We'll keep trying automatically!_",
                         parse_mode="Markdown",
                         reply_markup=retry_keyboard
@@ -3052,6 +3178,10 @@ if memeseal_dp:
     @memeseal_dp.message(Command("pot"))
     async def memeseal_pot(message: types.Message):
         """Show current lottery pot - FULL DEGEN MODE 🎰🐸"""
+        if not LOTTERY_ENABLED:
+            await message.answer(
+                await localized(message.from_user.id, "lottery_unavailable"), parse_mode="Markdown")
+            return
         pot_stars = await db.lottery.get_pot_size_stars()
         pot_ton = await db.lottery.get_pot_size_ton()
         total_entries = await db.lottery.get_total_entries()
@@ -3078,6 +3208,9 @@ if memeseal_dp:
     async def memeseal_mytickets(message: types.Message):
         """Show user's lottery tickets - DEGEN STYLE"""
         user_id = message.from_user.id
+        if not LOTTERY_ENABLED:
+            await message.answer(await localized(user_id, "lottery_unavailable"), parse_mode="Markdown")
+            return
         ticket_count = await db.lottery.count_user_entries(user_id)
         win_chance = await lottery_win_chance(user_id)
 
@@ -3119,7 +3252,7 @@ if memeseal_dp:
                 await memeseal_bot.download_file(file.file_path, file_path)
 
                 file_hash = hash_file(file_path)
-                comment = f"MemeSeal:{file_hash[:16]}"
+                comment = seal_comment("MemeSeal", file_hash)
 
                 try:
                     await send_ton_transaction(comment)
@@ -3166,11 +3299,11 @@ if memeseal_dp:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [types.InlineKeyboardButton(text="⭐ Pay 3 Stars & Seal Now", callback_data="ms_pay_stars_single")],
                 [types.InlineKeyboardButton(text="💎 Pay 0.15 TON instead", callback_data="ms_pay_ton_single")],
-                [types.InlineKeyboardButton(text="🚀 Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
+                [types.InlineKeyboardButton(text=f"🚀 Unlimited ({STARS_MONTHLY_SUBSCRIPTION} ⭐/mo)", callback_data="ms_pay_stars_sub")]
             ])
             await message.answer(
                 "✅ **Ready to seal!**\n\n"
-                "**Cost:** 1 ⭐ Star (~$0.02)\n"
+                f"**Cost:** {STARS_SINGLE_NOTARIZATION} ⭐ Stars\n"
                 "**You get:** On-chain timestamp + verification link\n\n"
                 "👇 Tap to seal it on TON forever:",
                 parse_mode="Markdown",
@@ -3194,7 +3327,7 @@ if memeseal_dp:
             await memeseal_bot.download_file(file.file_path, file_path)
 
             file_hash = hash_file(file_path)
-            comment = f"MemeSeal:{file_hash[:16]}"
+            comment = seal_comment("MemeSeal", file_hash)
 
             await send_ton_transaction(comment)
             sent = True
@@ -3240,7 +3373,7 @@ if memeseal_dp:
                 await memeseal_bot.download_file(file.file_path, file_path)
 
                 file_hash = hash_file(file_path)
-                comment = f"MemeSeal:Screenshot:{file_hash[:12]}"
+                comment = seal_comment("MemeSeal:Screenshot", file_hash)
 
                 try:
                     await send_ton_transaction(comment)
@@ -3285,11 +3418,11 @@ if memeseal_dp:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [types.InlineKeyboardButton(text="⭐ Pay 3 Stars & Seal Now", callback_data="ms_pay_stars_single")],
                 [types.InlineKeyboardButton(text="💎 Pay 0.15 TON instead", callback_data="ms_pay_ton_single")],
-                [types.InlineKeyboardButton(text="🚀 Unlimited (15 ⭐/mo)", callback_data="ms_pay_stars_sub")]
+                [types.InlineKeyboardButton(text=f"🚀 Unlimited ({STARS_MONTHLY_SUBSCRIPTION} ⭐/mo)", callback_data="ms_pay_stars_sub")]
             ])
             await message.answer(
                 "✅ **Ready to seal!**\n\n"
-                "**Cost:** 1 ⭐ Star (~$0.02)\n"
+                f"**Cost:** {STARS_SINGLE_NOTARIZATION} ⭐ Stars\n"
                 "**You get:** On-chain timestamp + verification link\n\n"
                 "👇 Tap to seal it on TON forever:",
                 parse_mode="Markdown",
@@ -3313,7 +3446,7 @@ if memeseal_dp:
             await memeseal_bot.download_file(file.file_path, file_path)
 
             file_hash = hash_file(file_path)
-            comment = f"MemeSeal:Screenshot:{file_hash[:12]}"
+            comment = seal_comment("MemeSeal:Screenshot", file_hash)
 
             await send_ton_transaction(comment)
             sent = True
@@ -3540,7 +3673,7 @@ async def twitter_callback(oauth_token: str = None, oauth_verifier: str = None):
 @app.get("/terms", response_class=HTMLResponse)
 async def terms_of_service():
     """Terms of Service"""
-    return "<html><head><title>MemeSeal Terms</title><style>body{background:#0d0d0d;color:#00ff41;font-family:monospace;padding:40px;max-width:800px;margin:0 auto}h1{color:#39ff14}h2{color:#00ffff;margin-top:30px}a{color:#ff00ff}</style></head><body><h1>MemeSeal Terms of Service</h1><p>Last updated: December 2024</p><h2>1. Acceptance</h2><p>By using MemeSeal, you agree to these terms.</p><h2>2. Service</h2><p>MemeSeal provides blockchain timestamping on TON. 20% of fees go to lottery pot.</p><h2>3. Payments</h2><p>Payments via Telegram Stars or TON are final.</p><h2>4. No Guarantees</h2><p>Service provided as-is. DYOR. NFA.</p><h2>5. Contact</h2><p><a href='https://t.me/MemeSealTON'>Telegram</a></p></body></html>"
+    return ("<html><head><title>MemeSeal Terms</title><style>body{background:#0d0d0d;color:#00ff41;font-family:monospace;padding:40px;max-width:800px;margin:0 auto}h1{color:#39ff14}h2{color:#00ffff;margin-top:30px}a{color:#ff00ff}</style></head><body><h1>MemeSeal Terms of Service</h1><p>Last updated: December 2024</p><h2>1. Acceptance</h2><p>By using MemeSeal, you agree to these terms.</p><h2>2. Service</h2><p>MemeSeal provides blockchain timestamping on TON." + (" 20% of fees go to lottery pot." if LOTTERY_ENABLED else "") + "</p><h2>3. Payments</h2><p>Payments via Telegram Stars or TON are final.</p><h2>4. No Guarantees</h2><p>Service provided as-is. DYOR. NFA.</p><h2>5. Contact</h2><p><a href='https://t.me/MemeSealTON'>Telegram</a></p></body></html>")
 
 
 @app.get("/memescan", response_class=HTMLResponse)
@@ -4699,7 +4832,8 @@ async def whitepaper(request: Request):
 async def landing_page_memeseal(request: Request):
     """MemeSeal TON - Main landing page"""
     return templates.TemplateResponse(request, "landing.html", {
-        "memeseal_username": MEMESEAL_USERNAME
+        "memeseal_username": MEMESEAL_USERNAME,
+        "lottery_enabled": LOTTERY_ENABLED,
     })
 
 @app.get("/notaryton", response_class=HTMLResponse)
@@ -4837,12 +4971,12 @@ async def api_notarize(request: Request):
             return {"success": False, "error": "Failed to fetch contract"}
 
         contract_hash = hash_data(contract_code)
-        comment = f"NotaryTON:API:{contract_hash[:16]}"
+        comment = seal_comment("NotaryTON:API", contract_hash)
 
         # Add metadata to comment if provided
         project_name = metadata.get("project_name")
         if isinstance(project_name, str) and project_name:
-            comment = f"NotaryTON:{project_name[:20]}:{contract_hash[:12]}"
+            comment = seal_comment(f"NotaryTON:{project_name[:20]}", contract_hash)
 
         await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
         await log_notarization(user_id, contract_id, contract_hash, paid=True)
@@ -4956,7 +5090,7 @@ async def api_batch_notarize(request: Request):
                 contract_code = await get_contract_code_from_tx(address)
                 contract_hash = hash_data(contract_code)
 
-                comment = f"NotaryTON:{name[:20]}:{contract_hash[:12]}" if name else f"NotaryTON:Batch:{contract_hash[:16]}"
+                comment = seal_comment(f"NotaryTON:{name[:20]}" if name else "NotaryTON:Batch", contract_hash)
                 await send_ton_transaction(comment, amount_ton=TON_SINGLE_SEAL)
                 await log_notarization(user_id, address, contract_hash, paid=True)
 
@@ -5168,14 +5302,15 @@ async def _wager_chips(user_id: int, bet: int):
     balance, which only a verified Stars payment fills, never from a number
     the caller sends. No debit, no entry. The entry is exactly 20% of the
     wager, rounded down: rounding a 1-chip bet up to a 1-star entry made
-    many tiny bets worth more tickets and pot than one big one.
+    many tiny bets worth more tickets and pot than one big one. While
+    LOTTERY_ENABLED is off there is no entry at all (entry_stars is 0).
     """
     debited, chips = await db.casino.deduct_chips(user_id, bet)
     if not debited:
         return False, 0, chips
-    entry_stars = bet // 5  # 20% of the wager feeds the pot
+    entry_stars = bet // 5 if LOTTERY_ENABLED else 0  # 20% of the wager feeds the pot
     if entry_stars > 0:
-        await db.lottery.add_entry(user_id, amount_stars=entry_stars)
+        await enter_lottery(user_id, entry_stars)
     return True, entry_stars, chips
 
 
@@ -5221,6 +5356,7 @@ async def api_casino_bet(request: Request):
         "game": game,
         "message": "Bet recorded. +1 lottery ticket!" if entry_stars > 0
                    else f"Bet recorded. Bets under {MIN_LOTTERY_WAGER} chips add no lottery ticket."
+                   if LOTTERY_ENABLED else "Bet recorded."
     }
 
 
@@ -5268,7 +5404,8 @@ async def api_casino_buy_chips(request: Request):
 
         invoice = await active_bot.create_invoice_link(
             title=f"{amount} Casino Chips 🎰",
-            description=f"Buy {amount} chips to play slots, crash, and roulette. 20% of bets feed the lottery!",
+            description=f"Buy {amount} chips to play slots, crash, and roulette."
+                        + (" 20% of bets feed the lottery!" if LOTTERY_ENABLED else ""),
             payload=f"casino_chips_{user_id}_{amount}_{int(time.time())}",
             currency="XTR",  # Telegram Stars
             prices=prices,
@@ -5368,7 +5505,8 @@ async def api_casino_play(request: Request):
         "bet": bet_amount,
         "chips": chips,
         "lottery_contribution": entry_stars,
-        "message": f"Better luck next time! You fed the lottery pot 🐸"
+        "message": "Better luck next time! You fed the lottery pot 🐸" if LOTTERY_ENABLED
+                   else "Better luck next time! 🐸"
     }
 
 
@@ -5686,8 +5824,11 @@ async def on_startup():
     # 🐸 Start pending payment cleanup task
     asyncio.create_task(cleanup_pending_payments())
 
-    # 🎰 Start lottery draw task (Sunday 20:00 UTC)
-    asyncio.create_task(run_sunday_lottery_draw())
+    # 🎰 Start lottery draw task (Sunday 00:00 UTC), only while the lottery runs
+    if LOTTERY_ENABLED:
+        asyncio.create_task(run_sunday_lottery_draw())
+    else:
+        print("⏸️ LOTTERY_ENABLED is off: no lottery entries are made and the Sunday draw is not started")
 
     # 🕷️ Start token crawler (data moat)
     if os.getenv("CRAWLER_ENABLED", "").lower() == "true":

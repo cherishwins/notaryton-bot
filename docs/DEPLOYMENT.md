@@ -210,27 +210,11 @@ Follow instructions to send 0.1 TON to your wallet.
 
 ---
 
-## 🔧 PART 4: Run Admin Outreach Campaign
+## 🔧 PART 4: Admin Outreach
 
-Once the bot is working:
-
-```bash
-# On your local machine
-cd /home/jesse/dev/projects/personal/ton/notaryton-bot
-
-python outreach.py
-```
-
-This will:
-- Find admins in TON-related groups
-- DM them about NotaryTON
-- Offer 5% referral commission
-- Log all sent DMs to `outreach_sent.csv`
-
-**Rate limits**:
-- 1 second between DMs
-- 3 seconds between groups
-- Automatically skips already-contacted admins
+There is no outreach script any more. `outreach.py` mass-DMed group admins,
+and unsolicited bulk DMs break Telegram's terms and get bots and accounts
+banned. Reach admins one at a time, by hand, with the 5% referral offer.
 
 ---
 

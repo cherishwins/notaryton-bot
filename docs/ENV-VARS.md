@@ -57,13 +57,14 @@
 
 ### Money switches (off unless exactly `true`)
 
-These move value at a user's request or hold user balances. Leave them unset
-until a written Canadian legal opinion says otherwise.
+These move value at a user's request, hold user balances, or run a lottery.
+Leave them unset until a written Canadian legal opinion says otherwise.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CASINO_ENABLED` | off | `/api/v1/casino/*`. Off: 503. On: user routes need `X-Telegram-Init-Data` signed by `BOT_TOKEN` or `MEMESEAL_BOT_TOKEN` |
 | `CASINO_INIT_DATA_MAX_AGE` | 86400 | Seconds signed initData stays valid |
+| `LOTTERY_ENABLED` | off | The weekly lottery itself. A paid seal buying an entry into a draw for a prize is purchase + chance + prize, a lottery under s.206 of the Criminal Code even if the prize is never paid. Off: no entries are made (Stars, TON or casino wagers), the Sunday draw task is not started and `execute_lottery_draw` draws nothing, `/pot` and `/api/v1/lottery/*` answer 503, `/pot` and `/mytickets` reply that the lottery is not available, and the bots, landing page, terms and seal announcements show no tickets or pot. On: unchanged |
 | `LOTTERY_AUTO_PAYOUT_ENABLED` | off | Sunday draw sends the pot in TON to the winner's wallet. Off: the prize is held in `lottery_prizes` for the operator. Whatever its value, no draw runs at all until `POST /admin/void-legacy-lottery` has run (below) |
 | `WITHDRAWALS_ENABLED` | off | `/withdraw` sends referral earnings in TON. `/api/v1/casino/withdraw`: 503 while off, 501 when on (no cash-out exists) |
 | `API_SEALS_PER_HOUR` | 30 | Seals one `/api` key may order per hour (counted per worker process). Also the largest batch `/api/v1/batch` accepts |
@@ -74,7 +75,8 @@ row to `lottery_prizes` (`held`, `sending`, `paid` or `review`), and only
 
 ### Right after deploying this version: the legacy lottery void
 
-The Sunday draw does not run until the void below has been done: it logs
+While `LOTTERY_ENABLED` is off there is no Sunday draw at all. With it on,
+the draw still does not run until the void below has been done: it logs
 `LOTTERY DRAW SKIPPED` every Sunday 00:00 UTC and draws, announces and records
 nothing, so the legacy pot stays in place for the void. Do it right after the
 deploy, before you turn on any switch:

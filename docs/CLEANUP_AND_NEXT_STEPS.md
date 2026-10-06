@@ -7,7 +7,6 @@
 
 ### Priority 1 - Root Junk Files
 ```bash
-rm /home/jesse/dev/projects/personal/ton/notaryton-bot/=3.15.0
 rm /home/jesse/dev/projects/personal/ton/notaryton-bot/Desktop-screenshot-*.png
 rm /home/jesse/dev/projects/personal/ton/notaryton-bot/Create-new-application-*.png
 rm /home/jesse/dev/projects/personal/ton/notaryton-bot/TON-Explorer-Transaction-*.png
@@ -63,7 +62,7 @@ git log --all --full-history -- .env
 | Task | Priority | Notes |
 |------|----------|-------|
 | Wait for App Catalog approval | High | 1 week review time |
-| Run outreach.py on top 50 groups | High | Get first users |
+| Reach admins of top 50 groups by hand (outreach.py removed: mass DMs break Telegram's terms) | High | Get first users |
 | Post in TON Nest Founders Chat | Medium | Community intro |
 | Monitor TG Analytics data | Medium | Verify it's working |
 

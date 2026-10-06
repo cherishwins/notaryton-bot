@@ -19,7 +19,7 @@ A Telegram bot for auto-notarizing TON blockchain memecoin launches. Single-file
 ### TON Blockchain Integration
 - Uses `pytoniq` library (LiteBalancer + WalletV4R2)
 - Wallet initialized from 24-word mnemonic in `TON_WALLET_SECRET`
-- Transactions send comments formatted as `NotaryTON:Launch:{hash[:16]}`
+- Seal transactions send comments built by `seal_comment()`: `<label>:<full 64-hex SHA-256>`, e.g. `NotaryTON:File:{hash}` (older seals carry only `hash[:16]`, or `hash[:12]` for screenshots; `seal_comment_proof()` accepts both)
 - `get_contract_code_from_tx()`: Fetches contract bytecode via LiteBalancer
 - `poll_wallet_for_payments()`: Background task with exponential backoff retry logic
 
@@ -109,11 +109,6 @@ python bot.py
 - ✅ `poll_wallet_for_payments()`: Monitors incoming TON, parses memos, auto-activates subs
 - ✅ Referral tracking: DB schema + handlers + /referral command
 
-## Admin Scripts
-- `outreach.py`: Standalone script to DM group admins with referral program pitch
-- Logs sent messages to `outreach_sent.csv` to avoid duplicates
-- Targets groups in `TARGET_GROUPS` list, rate-limited to 1 DM/second
-
 ## Testing Commands
 - `/start` - Basic functionality check
 - `/subscribe` - Shows payment instructions (0.1 TON)
@@ -139,7 +134,7 @@ python bot.py
 
 ### GTM Tactics
 1. Auto-join top 100 TON Telegram groups (where launches happen)
-2. DM group admins with referral offers (outreach.py script)
+2. Reach group admins with referral offers by hand (no mass-DM script: unsolicited bulk DMs break Telegram's terms)
 3. Partner with deploy bots (they pin NotaryTON, earn referral %)
 4. Product Hunt launch: "Blockchain Notary for Crypto Launches"
 5. Build public verification UI (SEO for contract searches)

@@ -27,11 +27,12 @@
 
 ```python
 # CURRENT (BAD)
-TONAPI_CASINO_KEY = os.getenv("TONAPI_CASINO_KEY", "AGVIA46VSFGJTSQAAAAA4AD4B3BPP6HY77QUOGTUFUTRNCUR35XJLMDOXBTDTC4VBE7QBNY")
-TONAPI_TOKENS_KEY = os.getenv("TONAPI_TOKENS_KEY", "AGVIA46VNGVZOYYAAAAB7HTFXTMRIDNKFV3UAKX4M2AVQ7JZIDFPR5ISHSZKMEWNAVCHVNI")
+TONAPI_CASINO_KEY = os.getenv("TONAPI_CASINO_KEY", "<redacted: rotate in TonConsole>")
+TONAPI_TOKENS_KEY = os.getenv("TONAPI_TOKENS_KEY", "<redacted: rotate in TonConsole>")
 ```
 
-**Impact:** API keys exposed in git history. Anyone with repo access can use these keys.
+**Impact:** API keys exposed in git history. The repo is public, so anyone can use these keys.
+The full keys were also quoted in this report until it was redacted; they remain in git history.
 
 **Fix:** Remove hardcoded fallbacks:
 ```python
@@ -39,7 +40,8 @@ TONAPI_CASINO_KEY = os.getenv("TONAPI_CASINO_KEY", "")
 TONAPI_TOKENS_KEY = os.getenv("TONAPI_TOKENS_KEY", "")
 ```
 
-**Action Required:** Rotate these API keys at tonconsole.com after fixing code.
+**Action Required:** The owner must rotate these API keys at tonconsole.com. Redacting
+them from the tree does not revoke them: they stay readable in git history until rotated.
 
 ---
 

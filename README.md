@@ -26,12 +26,12 @@ A suite of TON blockchain products: notarization, token intelligence, and trader
 Blockchain timestamping for the masses. Seal files on TON forever.
 
 ```
-Send file → Pay 1 Star → Sealed on TON → Verify anytime
+Send file → Pay 3 Stars → Sealed on TON → Verify anytime
 ```
 
 **Features:**
 - Instant payments (Stars or TON)
-- Weekly lottery (20% of fees to pot)
+- Weekly lottery (20% of fees to pot), off unless `LOTTERY_ENABLED=true` (legal opinion first)
 - Referral system (5% commission)
 - Multi-language (EN/RU/ZH)
 
@@ -163,8 +163,8 @@ notaryton-bot/
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/pot` | GET | Current lottery pot |
-| `/api/v1/lottery/pot` | GET | Detailed pot stats |
+| `/pot` | GET | Current lottery pot (503 unless `LOTTERY_ENABLED=true`) |
+| `/api/v1/lottery/pot` | GET | Detailed pot stats (503 unless `LOTTERY_ENABLED=true`) |
 | `/health` | GET | Service health check |
 
 ---
@@ -218,9 +218,9 @@ See `config.py` for all available options.
 |---------|-------------|
 | `/start` | Begin here |
 | `/status` | Check subscription & stats |
-| `/subscribe` | Unlimited seals (15 Stars/mo) |
-| `/pot` | See lottery pot & countdown |
-| `/mytickets` | Your lottery entries |
+| `/subscribe` | Unlimited seals (50 Stars or 0.3 TON a month) |
+| `/pot` | See lottery pot & countdown (says "not available" unless `LOTTERY_ENABLED=true`) |
+| `/mytickets` | Your lottery entries (likewise) |
 | `/referral` | Get your invite link |
 | `/withdraw` | Cash out referral earnings, not lottery prizes (paused unless `WITHDRAWALS_ENABLED=true`) |
 | `/lang` | Switch language (EN/RU/ZH) |
