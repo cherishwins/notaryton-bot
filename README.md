@@ -1,4 +1,10 @@
-# NotaryTON Labs
+# LEGACY: NotaryTON Labs
+
+> **LEGACY REPOSITORY. Not under active development.**
+> The only active repo is **[cherishwins/x402-facilitator](https://github.com/cherishwins/x402-facilitator)**. Work there.
+> MemeSeal / MemeScan on TON. Not being worked on; its Render services are suspended. The rug-score and seal ideas continue inside the active repo.
+> Marked legacy 13 October 2026 so this repo stops being opened by mistake. Archive it in Settings when convenient.
+
 
 **Proof or it didn't happen.**
 
